@@ -4,13 +4,13 @@ A Python utility for managing and synchronizing search engines across Brave Brow
 
 **Project Home**: [https://github.com/mcgroarty/brave-search-sync](https://github.com/mcgroarty/brave-search-sync)
 
-## Current Status
-
-Mostly AI-coded, but humam-reviewed. Tested on macOS. I'll check Linux and Windows soon. Open an issue if you test before me and it fails.
-
 ## TL;DR: Too Long, Didn't Read. Twitter broke my attention span.
 
 This tool syncs custom search engine shortcuts across all your Brave browser profiles. Close Brave, run `./brave-search-sync -cs` to sync everything, then reopen Brave and visit `brave://settings/search` in each profile to activate the newly added search engines. Use `-c` on its own for a dry run preview. It's good to backup your Brave config first, just in case. The brave config dir location is shown in `-h`. Run `./brave-search-sync --smoke-test` to check if your system is ready.
+
+## Current Status
+
+Mostly AI-coded, but humam-reviewed. Tested on macOS. I'll check Linux and Windows soon. Open an issue if you test before me and it fails.
 
 ## Overview
 
