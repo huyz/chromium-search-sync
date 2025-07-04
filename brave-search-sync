@@ -1,0 +1,1304 @@
+#!/usr/bin/env python3
+"""
+Brave Browser Search Sync
+
+Copyright 2025 McGroarty
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
+This script detects the operating system and lists all Brave browser profiles
+with their actual names (not just directory names).
+
+WARNING: Always back up your Brave browser configuration before using this tool to modify your Brave configuration.
+Use at your own risk.
+
+FUNCTIONALITY:
+- Detects OS (macOS, Linux, Windows, Windows/Cygwin) and locates Brave data directories
+- Reads profile names from Local State file (primary source)
+- Falls back to individual profile Preferences files if needed
+- Handles multiple profile types: Default, Profile 1-N, System Profile
+- Provides clear output showing profile names and their directory locations
+- Lists search engine shortcuts for each profile or combined across all profiles
+- Syncs newest search engines to all profiles with case-insensitive keyword matching
+- Deletes specified search engine shortcuts from all profiles (with built-in protection)
+
+REQUIREMENTS:
+- Python 3.6+ (uses pathlib and f-strings)
+- Standard library only (no external dependencies)
+- Brave browser must be installed and run at least once
+
+SEARCH ENGINE DATABASE SCHEMA:
+The search engines are stored in the 'keywords' table within each profile's 'Web Data' SQLite database.
+
+TABLE: keywords
+Key fields for search engine editing:
+- id (INTEGER, PRIMARY KEY): Unique identifier for each search engine
+- short_name (VARCHAR, NOT NULL): Display name (e.g., "Google", "DuckDuckGo")
+- keyword (VARCHAR, NOT NULL): Shortcut keyword (e.g., ":g", ":d", "csr")
+- url (VARCHAR, NOT NULL): Search URL template with {searchTerms} placeholder
+- favicon_url (VARCHAR, NOT NULL): URL to the search engine's favicon
+- safe_for_autoreplace (INTEGER): 1 if safe to auto-replace, 0 if not
+- prepopulate_id (INTEGER): ID for built-in search engines (0 for custom)
+- is_active (INTEGER): 1 if currently active/default, 0 if not
+- usage_count (INTEGER): Number of times this search engine has been used
+- date_created (INTEGER): WebKit timestamp when created
+- last_modified (INTEGER): WebKit timestamp of last modification
+
+Additional fields:
+- originating_url (VARCHAR): URL where search engine was discovered
+- input_encodings (VARCHAR): Supported character encodings (typically "UTF-8")
+- suggest_url (VARCHAR): URL for search suggestions
+- sync_guid (VARCHAR): Unique identifier for Chrome sync
+- alternate_urls (VARCHAR): JSON array of alternate URL patterns
+- image_url (VARCHAR): URL template for image searches
+- search_url_post_params (VARCHAR): POST parameters for search requests
+- suggest_url_post_params (VARCHAR): POST parameters for suggestion requests
+- image_url_post_params (VARCHAR): POST parameters for image searches
+- new_tab_url (VARCHAR): URL for new tab page
+- last_visited (INTEGER): WebKit timestamp of last use
+- created_by_policy (INTEGER): 1 if created by enterprise policy
+- created_from_play_api (INTEGER): 1 if created from Play API
+- starter_pack_id (INTEGER): ID for starter pack search engines
+- enforced_by_policy (INTEGER): 1 if enforced by enterprise policy
+- featured_by_policy (INTEGER): 1 if featured by enterprise policy
+- url_hash (BLOB): Hash of the search URL for deduplication
+
+NOTES FOR EDITING:
+- Keywords must be unique within a profile
+- Built-in search engines (prepopulate_id > 0) should generally not be deleted
+- WebKit timestamps are microseconds since January 1, 1601 (Windows epoch)
+  Formula: webkit_timestamp = (unix_timestamp + 11644473600) * 1000000
+- URLs should contain {searchTerms} placeholder for the search query
+- Custom search engines typically have prepopulate_id = 0
+- The database should be closed/locked when Brave is running
+- IDs are auto-incrementing integers starting from 1
+- Common prepopulate_id values: 1 (Google), 501 (DuckDuckGo), 550 (Brave Search)
+- safe_for_autoreplace should be 1 for most search engines
+- favicon_url should be provided for proper UI display
+
+MAINTAINABILITY GUIDELINES:
+- Keep functions single-purpose and well-documented
+- Use clear variable names and type hints where helpful
+- Handle errors gracefully with try/except blocks
+- Use pathlib for cross-platform path handling
+- Keep OS-specific logic centralized in detect_os()
+- Add new profile types by extending the profile discovery logic
+- Test on multiple operating systems when making changes
+
+EXPECTED OUTPUT:
+- Profile names should match what users see in Brave's profile switcher
+"""
+
+import os
+import sys
+import platform
+import json
+import argparse
+import sqlite3
+from pathlib import Path
+
+
+def detect_os():
+    """Detect the operating system and return appropriate profile paths."""
+    system = platform.system().lower()
+    
+    if system == "darwin":  # macOS
+        return "macOS", [
+            Path.home() / "Library" / "Application Support" / "BraveSoftware" / "Brave-Browser"
+        ]
+    elif system == "linux":
+        return "Linux", [
+            Path.home() / ".config" / "BraveSoftware" / "Brave-Browser"
+        ]
+    elif system == "windows":
+        # Check if running under Cygwin
+        if "CYGWIN" in os.environ.get("TERM", ""):
+            return "Windows (Cygwin)", [
+                Path.home() / "AppData" / "Local" / "BraveSoftware" / "Brave-Browser"
+            ]
+        else:
+            return "Windows", [
+                Path.home() / "AppData" / "Local" / "BraveSoftware" / "Brave-Browser"
+            ]
+    else:
+        return "Unknown", []
+
+
+def get_profile_names_from_local_state(brave_path):
+    """Get profile names from the Local State file."""
+    local_state_file = brave_path / "Local State"
+    profile_names = {}
+    
+    if local_state_file.exists():
+        try:
+            with open(local_state_file, 'r', encoding='utf-8') as f:
+                local_state = json.load(f)
+                if 'profile' in local_state and 'info_cache' in local_state['profile']:
+                    for profile_id, profile_info in local_state['profile']['info_cache'].items():
+                        profile_names[profile_id] = profile_info.get('name', profile_id)
+        except (json.JSONDecodeError, IOError):
+            pass
+    
+    return profile_names
+
+
+def get_profile_name(profile_path, profile_names_cache):
+    """Extract the profile name from the profile directory."""
+    profile_dir_name = profile_path.name
+    
+    # First try to get from Local State cache
+    if profile_dir_name in profile_names_cache:
+        return profile_names_cache[profile_dir_name]
+    
+    # Fallback: try to get from individual profile Preferences
+    prefs_file = profile_path / "Preferences"
+    if prefs_file.exists():
+        try:
+            with open(prefs_file, 'r', encoding='utf-8') as f:
+                prefs = json.load(f)
+                # Try to get the profile name from preferences
+                profile_name = prefs.get('profile', {}).get('name', '')
+                if profile_name:
+                    return profile_name
+        except (json.JSONDecodeError, IOError):
+            pass
+    
+    # Final fallback to directory name
+    return profile_dir_name
+
+
+def get_search_shortcuts(profile_path):
+    """Get search engine shortcuts from a profile's Web Data SQLite database."""
+    web_data_file = profile_path / "Web Data"
+    shortcuts = []
+    
+    if not web_data_file.exists():
+        return shortcuts
+    
+    try:
+        conn = sqlite3.connect(str(web_data_file))
+        cursor = conn.cursor()
+        
+        # Query the keywords table for search engines with non-empty keywords
+        cursor.execute("""
+            SELECT short_name, keyword, url 
+            FROM keywords 
+            WHERE keyword != '' AND keyword IS NOT NULL
+            ORDER BY short_name
+        """)
+        
+        for row in cursor.fetchall():
+            short_name, keyword, url = row
+            if short_name and keyword and url:
+                shortcuts.append({
+                    'name': short_name,
+                    'keyword': keyword,
+                    'url': url
+                })
+        
+        conn.close()
+        
+    except (sqlite3.Error, OSError):
+        pass
+    
+    return shortcuts
+
+
+def get_search_shortcuts_with_metadata(profile_path, profile_name):
+    """Get search engine shortcuts with metadata from a profile's Web Data SQLite database."""
+    web_data_file = profile_path / "Web Data"
+    shortcuts = []
+    
+    if not web_data_file.exists():
+        return shortcuts
+    
+    try:
+        conn = sqlite3.connect(str(web_data_file))
+        cursor = conn.cursor()
+        
+        # Query the keywords table for search engines with metadata
+        cursor.execute("""
+            SELECT short_name, keyword, url, last_modified, favicon_url, usage_count, prepopulate_id
+            FROM keywords 
+            WHERE keyword != '' AND keyword IS NOT NULL
+            ORDER BY short_name
+        """)
+        
+        for row in cursor.fetchall():
+            short_name, keyword, url, last_modified, favicon_url, usage_count, prepopulate_id = row
+            if short_name and keyword and url:
+                shortcuts.append({
+                    'name': short_name,
+                    'keyword': keyword,
+                    'url': url,
+                    'last_modified': last_modified or 0,  # Handle NULL values
+                    'favicon_url': favicon_url or '',
+                    'usage_count': usage_count or 0,
+                    'prepopulate_id': prepopulate_id or 0,
+                    'profile_name': profile_name,
+                    'profile_path': str(profile_path)
+                })
+        
+        conn.close()
+        
+    except (sqlite3.Error, OSError):
+        pass
+    
+    return shortcuts
+
+
+def parse_arguments():
+    """Parse command-line arguments."""
+    parser = argparse.ArgumentParser(
+        description="Brave Browser Search Sync - Manage search engines across Brave browser profiles",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  %(prog)s -p          List all Brave browser profiles
+  %(prog)s -s          Show search engine shortcuts for each profile
+  %(prog)s -c          Show combined search engines from all profiles (most recent version of each shortcut)
+  %(prog)s -cs         Sync newest search engines to all profiles
+  %(prog)s -d :www     Delete search engine with shortcut ':www' from all profiles
+  %(prog)s --smoke-test Run system validation checks
+  %(prog)s -h          Show this help message
+
+This script detects your operating system and lists all Brave browser profiles
+with their actual names (not just directory names).
+
+WARNING: Always back up your Brave browser configuration before using this tool to modify your Brave configuration.
+On this system, back up: ~/Library/Application Support/BraveSoftware/Brave-Browser
+Use at your own risk.
+        """.strip()
+    )
+    
+    parser.add_argument(
+        '-p', '--profiles',
+        action='store_true',
+        help='List all Brave browser profiles with their names and directories'
+    )
+    
+    parser.add_argument(
+        '-s', '--search-shortcuts',
+        action='store_true',
+        help='Show search engine shortcuts for each profile'
+    )
+    
+    parser.add_argument(
+        '-c', '--combined',
+        action='store_true',
+        help='Show combined search engines from all profiles (most recent version of each shortcut)'
+    )
+    
+    parser.add_argument(
+        '-cs', '--combined-sync',
+        action='store_true',
+        help='Sync newest search engines to all profiles (case-insensitive keyword matching) - CAUTION: Modifies Brave configuration'
+    )
+    
+    parser.add_argument(
+        '-d', '--delete',
+        type=str,
+        metavar='SHORTCUT',
+        help='Delete search engine with specified shortcut from all profiles - CAUTION: Modifies Brave configuration'
+    )
+    
+    parser.add_argument(
+        '--smoke-test',
+        action='store_true',
+        help='Run system validation checks to ensure the tool can operate safely'
+    )
+    
+    return parser.parse_args()
+
+
+def list_brave_profiles():
+    """List all Brave browser profiles."""
+    os_name, brave_paths = detect_os()
+    
+    print(f"Operating System: {os_name}")
+    print("-" * 50)
+    
+    if not brave_paths:
+        print("Unsupported operating system")
+        return
+    
+    profiles_found = False
+    
+    for brave_path in brave_paths:
+        print(f"Checking Brave data directory: {brave_path}")
+        
+        if not brave_path.exists():
+            print(f"  Directory not found: {brave_path}")
+            continue
+        
+        # Get profile names from Local State
+        profile_names_cache = get_profile_names_from_local_state(brave_path)
+        
+        # Look for profile directories
+        profile_dirs = []
+        
+        # Check for Default profile
+        default_profile = brave_path / "Default"
+        if default_profile.exists() and default_profile.is_dir():
+            profile_dirs.append(default_profile)
+        
+        # Check for numbered profiles (Profile 1, Profile 2, etc.)
+        for item in brave_path.iterdir():
+            if item.is_dir() and item.name.startswith("Profile "):
+                profile_dirs.append(item)
+        
+        # Check for System Profile
+        system_profile = brave_path / "System Profile"
+        if system_profile.exists() and system_profile.is_dir():
+            profile_dirs.append(system_profile)
+        
+        if not profile_dirs:
+            print("  No profiles found")
+            continue
+        
+        profiles_found = True
+        print(f"  Found {len(profile_dirs)} profile(s):")
+        
+        for profile_dir in sorted(profile_dirs):
+            profile_name = get_profile_name(profile_dir, profile_names_cache)
+            print(f"    - {profile_name} (Directory: {profile_dir.name})")
+    
+    if not profiles_found:
+        print("\nNo Brave profiles found on this system.")
+        print("Make sure Brave browser is installed and has been run at least once.")
+
+
+def show_search_shortcuts():
+    """Show search engine shortcuts for all profiles."""
+    os_name, brave_paths = detect_os()
+    
+    print(f"Operating System: {os_name}")
+    print("-" * 80)
+    
+    if not brave_paths:
+        print("Unsupported operating system")
+        return
+    
+    profiles_found = False
+    
+    for brave_path in brave_paths:
+        if not brave_path.exists():
+            continue
+        
+        # Get profile names from Local State
+        profile_names_cache = get_profile_names_from_local_state(brave_path)
+        
+        # Look for profile directories
+        profile_dirs = []
+        
+        # Check for Default profile
+        default_profile = brave_path / "Default"
+        if default_profile.exists() and default_profile.is_dir():
+            profile_dirs.append(default_profile)
+        
+        # Check for numbered profiles (Profile 1, Profile 2, etc.)
+        for item in brave_path.iterdir():
+            if item.is_dir() and item.name.startswith("Profile "):
+                profile_dirs.append(item)
+        
+        # Check for System Profile
+        system_profile = brave_path / "System Profile"
+        if system_profile.exists() and system_profile.is_dir():
+            profile_dirs.append(system_profile)
+        
+        if not profile_dirs:
+            continue
+        
+        profiles_found = True
+        
+        for profile_dir in sorted(profile_dirs):
+            profile_name = get_profile_name(profile_dir, profile_names_cache)
+            shortcuts = get_search_shortcuts(profile_dir)
+            
+            print(f"\nProfile: {profile_name} (Directory: {profile_dir.name})")
+            print("-" * 80)
+            
+            if not shortcuts:
+                print("  No search shortcuts found")
+                continue
+            
+            # Print header
+            print(f"{'Name':<30} {'Shortcut':<15} {'URL':<35}")
+            print("-" * 80)
+            
+            # Print shortcuts
+            for shortcut in sorted(shortcuts, key=lambda x: x['keyword']):
+                name = shortcut['name'][:29] if len(shortcut['name']) > 29 else shortcut['name']
+                keyword = shortcut['keyword'][:14] if len(shortcut['keyword']) > 14 else shortcut['keyword']
+                url = shortcut['url'][:34] if len(shortcut['url']) > 34 else shortcut['url']
+                
+                print(f"{name:<30} {keyword:<15} {url:<35}")
+    
+    if not profiles_found:
+        print("\nNo Brave profiles found on this system.")
+        print("Make sure Brave browser is installed and has been run at least once.")
+
+
+def show_combined_search_shortcuts():
+    """Show combined search engine shortcuts from all profiles, using the most recent version of each shortcut."""
+    os_name, brave_paths = detect_os()
+    
+    print(f"Operating System: {os_name}")
+    print("-" * 100)
+    
+    if not brave_paths:
+        print("Unsupported operating system")
+        return
+    
+    # Dictionary to store the most recent version of each shortcut
+    combined_shortcuts = {}
+    profiles_found = False
+    
+    for brave_path in brave_paths:
+        if not brave_path.exists():
+            continue
+        
+        # Get profile names from Local State
+        profile_names_cache = get_profile_names_from_local_state(brave_path)
+        
+        # Look for profile directories
+        profile_dirs = []
+        
+        # Check for Default profile
+        default_profile = brave_path / "Default"
+        if default_profile.exists() and default_profile.is_dir():
+            profile_dirs.append(default_profile)
+        
+        # Check for numbered profiles (Profile 1, Profile 2, etc.)
+        for item in brave_path.iterdir():
+            if item.is_dir() and item.name.startswith("Profile "):
+                profile_dirs.append(item)
+        
+        # Check for System Profile
+        system_profile = brave_path / "System Profile"
+        if system_profile.exists() and system_profile.is_dir():
+            profile_dirs.append(system_profile)
+        
+        if not profile_dirs:
+            continue
+        
+        profiles_found = True
+        
+        for profile_dir in profile_dirs:
+            profile_name = get_profile_name(profile_dir, profile_names_cache)
+            shortcuts = get_search_shortcuts_with_metadata(profile_dir, profile_name)
+            
+            # Process each shortcut
+            for shortcut in shortcuts:
+                keyword = shortcut['keyword']
+                
+                # If we haven't seen this keyword before, or if this version is newer
+                if (keyword not in combined_shortcuts or 
+                    shortcut['last_modified'] > combined_shortcuts[keyword]['last_modified']):
+                    combined_shortcuts[keyword] = shortcut
+    
+    if not profiles_found:
+        print("\nNo Brave profiles found on this system.")
+        print("Make sure Brave browser is installed and has been run at least once.")
+        return
+    
+    if not combined_shortcuts:
+        print("No search shortcuts found in any profile.")
+        return
+    
+    print("Combined Search Engine Shortcuts (Most Recent Version)")
+    print("=" * 100)
+    print(f"Found {len(combined_shortcuts)} unique shortcuts across all profiles\n")
+    
+    # Print header
+    print(f"{'Name':<25} {'Shortcut':<12} {'URL':<35} {'Source Profile':<18}")
+    print("-" * 100)
+    
+    # Print shortcuts sorted by keyword
+    for keyword in sorted(combined_shortcuts.keys()):
+        shortcut = combined_shortcuts[keyword]
+        name = shortcut['name'][:24] if len(shortcut['name']) > 24 else shortcut['name']
+        keyword_display = keyword[:11] if len(keyword) > 11 else keyword
+        url = shortcut['url'][:34] if len(shortcut['url']) > 34 else shortcut['url']
+        profile = shortcut['profile_name'][:17] if len(shortcut['profile_name']) > 17 else shortcut['profile_name']
+        
+        print(f"{name:<25} {keyword_display:<12} {url:<35} {profile:<18}")
+    
+
+
+def check_brave_not_running():
+    """Check if Brave browser is running and exit with error if it is."""
+    try:
+        # Use ps to check for running Brave processes
+        import subprocess
+        result = subprocess.run(['ps', 'aux'], capture_output=True, text=True, check=True)
+        
+        # Look for Brave browser processes
+        brave_processes = []
+        for line in result.stdout.split('\n'):
+            if 'Brave Browser' in line and 'Helper' not in line:
+                # Extract process name and PID for display
+                parts = line.split()
+                if len(parts) >= 2:
+                    pid = parts[1]
+                    # Find the command part
+                    cmd_start = line.find('Brave Browser')
+                    if cmd_start != -1:
+                        cmd = line[cmd_start:].split()[0:2]  # Get "Brave Browser"
+                        brave_processes.append(f"PID {pid}: {' '.join(cmd)}")
+        
+        if brave_processes:
+            print("ERROR: Brave Browser is currently running!")
+            print("\nThis script reads and writes Brave configuration files, which is not safe")
+            print("while Brave is active. Please close Brave completely before running this script.")
+            print("\nRunning Brave processes detected:")
+            for process in brave_processes:
+                print(f"  - {process}")
+            print("\nTo close Brave:")
+            print("  1. Quit Brave normally (Cmd+Q on macOS)")
+            print("  2. Or use: pkill -f 'Brave Browser'")
+            print("  3. Wait a few seconds, then run this script again")
+            sys.exit(1)
+            
+    except subprocess.CalledProcessError:
+        # ps command failed, but continue - we'll handle database locks later
+        pass
+    except FileNotFoundError:
+        # ps command not found (unlikely on macOS/Linux), but continue
+        pass
+
+
+def unix_to_webkit_timestamp(unix_timestamp):
+    """Convert Unix timestamp to WebKit timestamp."""
+    # WebKit epoch is January 1, 1601; Unix epoch is January 1, 1970
+    # Difference is 11644473600 seconds
+    webkit_epoch_offset = 11644473600
+    return int((unix_timestamp + webkit_epoch_offset) * 1000000)
+
+
+def get_existing_keywords_case_insensitive(profile_path):
+    """Get existing keywords from a profile, returning a case-insensitive set."""
+    web_data_file = profile_path / "Web Data"
+    keywords = set()
+    
+    if not web_data_file.exists():
+        return keywords
+    
+    try:
+        conn = sqlite3.connect(str(web_data_file))
+        cursor = conn.cursor()
+        
+        cursor.execute("SELECT keyword FROM keywords WHERE keyword != '' AND keyword IS NOT NULL")
+        for row in cursor.fetchall():
+            keywords.add(row[0].lower())
+        
+        conn.close()
+    except (sqlite3.Error, OSError):
+        pass
+    
+    return keywords
+
+
+def insert_search_engine(profile_path, search_engine):
+    """Insert a search engine into a profile's database."""
+    web_data_file = profile_path / "Web Data"
+    
+    if not web_data_file.exists():
+        return False
+    
+    try:
+        conn = sqlite3.connect(str(web_data_file))
+        cursor = conn.cursor()
+        
+        # Generate current WebKit timestamp
+        import time
+        current_webkit_time = unix_to_webkit_timestamp(time.time())
+        
+        # Insert the search engine
+        cursor.execute("""
+            INSERT INTO keywords (
+                short_name, keyword, url, favicon_url, safe_for_autoreplace, 
+                prepopulate_id, date_created, last_modified, usage_count, 
+                input_encodings, suggest_url, originating_url, sync_guid,
+                alternate_urls, image_url, search_url_post_params, 
+                suggest_url_post_params, image_url_post_params, new_tab_url,
+                last_visited, created_by_policy, created_from_play_api,
+                starter_pack_id, enforced_by_policy, featured_by_policy, is_active
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            search_engine['name'],
+            search_engine['keyword'],
+            search_engine['url'],
+            search_engine['favicon_url'],
+            1,  # safe_for_autoreplace
+            0,  # prepopulate_id (0 for custom)
+            current_webkit_time,  # date_created
+            current_webkit_time,  # last_modified
+            0,  # usage_count
+            'UTF-8',  # input_encodings
+            '',  # suggest_url
+            '',  # originating_url
+            '',  # sync_guid
+            '[]',  # alternate_urls
+            '',  # image_url
+            '',  # search_url_post_params
+            '',  # suggest_url_post_params
+            '',  # image_url_post_params
+            '',  # new_tab_url
+            0,  # last_visited
+            0,  # created_by_policy
+            0,  # created_from_play_api
+            0,  # starter_pack_id
+            0,  # enforced_by_policy
+            0,  # featured_by_policy
+            0   # is_active
+        ))
+        
+        conn.commit()
+        conn.close()
+        return True
+        
+    except (sqlite3.Error, OSError) as e:
+        print(f"    Error inserting search engine: {e}")
+        return False
+        
+
+def delete_search_engine(profile_path, shortcut_keyword):
+    """Delete a search engine from a profile's database by keyword."""
+    web_data_file = profile_path / "Web Data"
+    
+    if not web_data_file.exists():
+        return False, "Web Data file not found"
+    
+    try:
+        conn = sqlite3.connect(str(web_data_file))
+        cursor = conn.cursor()
+        
+        # First, check if the keyword exists and get its details
+        cursor.execute("""
+            SELECT short_name, keyword, prepopulate_id 
+            FROM keywords 
+            WHERE keyword = ? COLLATE NOCASE
+        """, (shortcut_keyword,))
+        
+        result = cursor.fetchone()
+        if not result:
+            conn.close()
+            return False, "Shortcut not found"
+        
+        short_name, keyword, prepopulate_id = result
+        
+        # Check if it's a built-in search engine (generally shouldn't be deleted)
+        if prepopulate_id and prepopulate_id > 0:
+            conn.close()
+            return False, f"Built-in search engine (prepopulate_id: {prepopulate_id}) - deletion not recommended"
+        
+        # Delete the search engine
+        cursor.execute("DELETE FROM keywords WHERE keyword = ? COLLATE NOCASE", (shortcut_keyword,))
+        deleted_count = cursor.rowcount
+        
+        conn.commit()
+        conn.close()
+        
+        if deleted_count > 0:
+            return True, f"Deleted '{short_name}' ({keyword})"
+        else:
+            return False, "No rows deleted"
+        
+    except (sqlite3.Error, OSError) as e:
+        return False, f"Database error: {e}"
+
+
+def sync_search_engines_to_all_profiles():
+    """Sync the newest search engines to all profiles."""
+    os_name, brave_paths = detect_os()
+    
+    print(f"Operating System: {os_name}")
+    print("=" * 80)
+    print("SYNCING SEARCH ENGINES TO ALL PROFILES")
+    print("=" * 80)
+    
+    if not brave_paths:
+        print("Unsupported operating system")
+        return
+    
+    # First, collect all search engines from all profiles (same as combined)
+    combined_shortcuts = {}
+    all_profiles = []
+    
+    for brave_path in brave_paths:
+        if not brave_path.exists():
+            continue
+        
+        # Get profile names from Local State
+        profile_names_cache = get_profile_names_from_local_state(brave_path)
+        
+        # Look for profile directories
+        profile_dirs = []
+        
+        # Check for Default profile
+        default_profile = brave_path / "Default"
+        if default_profile.exists() and default_profile.is_dir():
+            profile_dirs.append(default_profile)
+        
+        # Check for numbered profiles (Profile 1, Profile 2, etc.)
+        for item in brave_path.iterdir():
+            if item.is_dir() and item.name.startswith("Profile "):
+                profile_dirs.append(item)
+        
+        # Check for System Profile
+        system_profile = brave_path / "System Profile"
+        if system_profile.exists() and system_profile.is_dir():
+            profile_dirs.append(system_profile)
+        
+        if not profile_dirs:
+            continue
+        
+        for profile_dir in profile_dirs:
+            profile_name = get_profile_name(profile_dir, profile_names_cache)
+            all_profiles.append((profile_dir, profile_name))
+            
+            shortcuts = get_search_shortcuts_with_metadata(profile_dir, profile_name)
+            
+            # Process each shortcut to find the newest version
+            for shortcut in shortcuts:
+                keyword = shortcut['keyword']
+                
+                # If we haven't seen this keyword before, or if this version is newer
+                if (keyword not in combined_shortcuts or 
+                    shortcut['last_modified'] > combined_shortcuts[keyword]['last_modified']):
+                    combined_shortcuts[keyword] = shortcut
+    
+    if not all_profiles:
+        print("No Brave profiles found on this system.")
+        return
+    
+    if not combined_shortcuts:
+        print("No search shortcuts found in any profile.")
+        return
+    
+    print(f"Found {len(combined_shortcuts)} unique search engines across all profiles")
+    print(f"Found {len(all_profiles)} profiles to sync")
+    print()
+    
+    # Now sync to each profile
+    total_added = 0
+    
+    for profile_dir, profile_name in all_profiles:
+        # Check if Web Data file exists before attempting to sync
+        web_data_file = profile_dir / "Web Data"
+        if not web_data_file.exists():
+            print(f"Skipping profile: {profile_name} (no Web Data file)")
+            continue
+            
+        print(f"Syncing to profile: {profile_name}")
+        
+        # Get existing keywords (case-insensitive)
+        existing_keywords = get_existing_keywords_case_insensitive(profile_dir)
+        
+        added_count = 0
+        for keyword, search_engine in combined_shortcuts.items():
+            # Check if this keyword already exists (case-insensitive)
+            if keyword.lower() not in existing_keywords:
+                success = insert_search_engine(profile_dir, search_engine)
+                if success:
+                    print(f"  + Added: {search_engine['name']} ({keyword})")
+                    added_count += 1
+                else:
+                    print(f"  ! Failed to add: {search_engine['name']} ({keyword})")
+        
+        if added_count == 0:
+            print("  - No new search engines added (all already exist)")
+        else:
+            print(f"  ✓ Added {added_count} new search engines")
+        
+        total_added += added_count
+        print()
+    
+    print("=" * 80)
+    print(f"SYNC COMPLETE: Added {total_added} search engines total across all profiles")
+    print("=" * 80)
+
+
+def delete_search_engine_from_all_profiles(shortcut_keyword):
+    """Delete a search engine with the specified shortcut from all profiles."""
+    os_name, brave_paths = detect_os()
+    
+    print(f"Operating System: {os_name}")
+    print("=" * 80)
+    print(f"DELETING SEARCH ENGINE SHORTCUT: '{shortcut_keyword}'")
+    print("=" * 80)
+    
+    if not brave_paths:
+        print("Unsupported operating system")
+        return
+    
+    # Collect all profiles
+    all_profiles = []
+    
+    for brave_path in brave_paths:
+        if not brave_path.exists():
+            continue
+        
+        # Get profile names from Local State
+        profile_names_cache = get_profile_names_from_local_state(brave_path)
+        
+        # Look for profile directories
+        profile_dirs = []
+        
+        # Check for Default profile
+        default_profile = brave_path / "Default"
+        if default_profile.exists() and default_profile.is_dir():
+            profile_dirs.append(default_profile)
+        
+        # Check for numbered profiles (Profile 1, Profile 2, etc.)
+        for item in brave_path.iterdir():
+            if item.is_dir() and item.name.startswith("Profile "):
+                profile_dirs.append(item)
+        
+        # Check for System Profile
+        system_profile = brave_path / "System Profile"
+        if system_profile.exists() and system_profile.is_dir():
+            profile_dirs.append(system_profile)
+        
+        if not profile_dirs:
+            continue
+        
+        for profile_dir in profile_dirs:
+            profile_name = get_profile_name(profile_dir, profile_names_cache)
+            all_profiles.append((profile_dir, profile_name))
+    
+    if not all_profiles:
+        print("No Brave profiles found on this system.")
+        return
+    
+    print(f"Found {len(all_profiles)} profiles to check")
+    print()
+    
+    # Delete from each profile
+    total_deleted = 0
+    profiles_with_shortcut = 0
+    
+    for profile_dir, profile_name in all_profiles:
+        # Check if Web Data file exists before attempting to delete
+        web_data_file = profile_dir / "Web Data"
+        if not web_data_file.exists():
+            print(f"Skipping profile: {profile_name} (no Web Data file)")
+            continue
+            
+        print(f"Checking profile: {profile_name}")
+        
+        success, message = delete_search_engine(profile_dir, shortcut_keyword)
+        
+        if success:
+            print(f"  ✓ {message}")
+            total_deleted += 1
+            profiles_with_shortcut += 1
+        else:
+            if "not found" in message.lower():
+                print(f"  - Shortcut '{shortcut_keyword}' not found in this profile")
+            else:
+                print(f"  ! {message}")
+                profiles_with_shortcut += 1  # It was found but couldn't be deleted
+    
+    print()
+    print("=" * 80)
+    if total_deleted > 0:
+        print(f"DELETION COMPLETE: Removed '{shortcut_keyword}' from {total_deleted} profile(s)")
+    else:
+        if profiles_with_shortcut > 0:
+            print(f"DELETION FAILED: Found '{shortcut_keyword}' in {profiles_with_shortcut} profile(s) but could not delete")
+        else:
+            print(f"SHORTCUT NOT FOUND: '{shortcut_keyword}' was not found in any profile")
+    print("=" * 80)
+
+
+def run_smoke_test():
+    """Run comprehensive system validation checks."""
+    print("BRAVE BROWSER SEARCH SYNC - SMOKE TEST")
+    print("=" * 80)
+    
+    # Track overall test results
+    test_results = []
+    warnings = []
+    
+    # Test 1: OS Detection
+    print("1. Testing OS Detection...")
+    os_name, brave_paths = detect_os()
+    if os_name != "Unknown" and brave_paths:
+        print(f"   ✓ OS detected: {os_name}")
+        print(f"   ✓ Expected Brave path(s): {', '.join(str(p) for p in brave_paths)}")
+        test_results.append(True)
+    else:
+        print(f"   ✗ OS detection failed: {os_name}")
+        test_results.append(False)
+    
+    # Test 2: Brave Directory Structure
+    print("\n2. Testing Brave Directory Structure...")
+    brave_found = False
+    profiles_found = False
+    
+    for brave_path in brave_paths:
+        if brave_path.exists():
+            print(f"   ✓ Brave directory found: {brave_path}")
+            brave_found = True
+            
+            # Check for Local State file
+            local_state = brave_path / "Local State"
+            if local_state.exists():
+                print(f"   ✓ Local State file found: {local_state}")
+            else:
+                print(f"   ! Local State file missing: {local_state}")
+                warnings.append("Local State file missing - profile name detection may be limited")
+            
+            # Look for profile directories
+            profile_dirs = []
+            
+            # Check for Default profile
+            default_profile = brave_path / "Default"
+            if default_profile.exists() and default_profile.is_dir():
+                profile_dirs.append(default_profile)
+            
+            # Check for numbered profiles
+            for item in brave_path.iterdir():
+                if item.is_dir() and item.name.startswith("Profile "):
+                    profile_dirs.append(item)
+            
+            # Check for System Profile
+            system_profile = brave_path / "System Profile"
+            if system_profile.exists() and system_profile.is_dir():
+                profile_dirs.append(system_profile)
+            
+            if profile_dirs:
+                print(f"   ✓ Found {len(profile_dirs)} profile(s)")
+                profiles_found = True
+                
+                # Check each profile for Web Data
+                for profile_dir in profile_dirs:
+                    web_data = profile_dir / "Web Data"
+                    if web_data.exists():
+                        print(f"   ✓ Web Data found in: {profile_dir.name}")
+                    else:
+                        print(f"   ! Web Data missing in: {profile_dir.name}")
+                        warnings.append(f"Web Data missing in profile: {profile_dir.name}")
+            else:
+                print(f"   ! No profiles found in: {brave_path}")
+        else:
+            print(f"   ! Brave directory not found: {brave_path}")
+    
+    test_results.append(brave_found)
+    test_results.append(profiles_found)
+    
+    # Test 3: Command-line Tools
+    print("\n3. Testing Required Command-line Tools...")
+    import subprocess
+    import shutil
+    
+    # Test ps command (for process checking)
+    ps_available = shutil.which('ps') is not None
+    if ps_available:
+        print("   ✓ 'ps' command available")
+        try:
+            result = subprocess.run(['ps', '--version'], capture_output=True, text=True, timeout=5)
+            if result.returncode == 0 or 'ps' in result.stderr.lower():
+                print("   ✓ 'ps' command functional")
+            else:
+                print("   ! 'ps' command may not be fully functional")
+                warnings.append("ps command may not work as expected")
+        except (subprocess.TimeoutExpired, subprocess.CalledProcessError):
+            print("   ! 'ps' command test failed")
+            warnings.append("ps command test failed - process detection may not work")
+    else:
+        print("   ! 'ps' command not found")
+        warnings.append("ps command not available - process detection disabled")
+    
+    test_results.append(ps_available)
+    
+    # Test 4: SQLite Database Schema
+    print("\n4. Testing SQLite Database Schema...")
+    schema_valid = False
+    
+    for brave_path in brave_paths:
+        if not brave_path.exists():
+            continue
+            
+        # Get profile names from Local State
+        profile_names_cache = get_profile_names_from_local_state(brave_path)
+        
+        # Look for profile directories with Web Data
+        profile_dirs = []
+        
+        # Check for Default profile
+        default_profile = brave_path / "Default"
+        if default_profile.exists() and default_profile.is_dir():
+            profile_dirs.append(default_profile)
+        
+        # Check for numbered profiles
+        for item in brave_path.iterdir():
+            if item.is_dir() and item.name.startswith("Profile "):
+                profile_dirs.append(item)
+        
+        # Check for System Profile
+        system_profile = brave_path / "System Profile"
+        if system_profile.exists() and system_profile.is_dir():
+            profile_dirs.append(system_profile)
+        
+        for profile_dir in profile_dirs:
+            web_data_file = profile_dir / "Web Data"
+            if not web_data_file.exists():
+                continue
+                
+            profile_name = get_profile_name(profile_dir, profile_names_cache)
+            print(f"   Testing schema in profile: {profile_name}")
+            
+            try:
+                conn = sqlite3.connect(str(web_data_file))
+                cursor = conn.cursor()
+                
+                # Check if keywords table exists
+                cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='keywords'")
+                if cursor.fetchone():
+                    print("   ✓ 'keywords' table found")
+                    
+                    # Check required columns
+                    cursor.execute("PRAGMA table_info(keywords)")
+                    columns = [row[1] for row in cursor.fetchall()]
+                    
+                    required_columns = ['short_name', 'keyword', 'url', 'last_modified', 'favicon_url', 'usage_count', 'prepopulate_id']
+                    missing_columns = [col for col in required_columns if col not in columns]
+                    
+                    if not missing_columns:
+                        print("   ✓ All required columns present")
+                        schema_valid = True
+                        
+                        # Test a simple query
+                        cursor.execute("SELECT COUNT(*) FROM keywords WHERE keyword != '' AND keyword IS NOT NULL")
+                        count = cursor.fetchone()[0]
+                        print(f"   ✓ Found {count} search engines with keywords")
+                        
+                        # Test schema by trying to read a few entries
+                        cursor.execute("""
+                            SELECT short_name, keyword, url, last_modified, favicon_url, usage_count, prepopulate_id
+                            FROM keywords 
+                            WHERE keyword != '' AND keyword IS NOT NULL
+                            LIMIT 3
+                        """)
+                        test_rows = cursor.fetchall()
+                        if test_rows:
+                            print(f"   ✓ Successfully read {len(test_rows)} test entries")
+                        else:
+                            print("   ! No search engines found (database may be empty)")
+                            warnings.append("No search engines found in database")
+                    else:
+                        print(f"   ✗ Missing required columns: {', '.join(missing_columns)}")
+                        test_results.append(False)
+                else:
+                    print("   ✗ 'keywords' table not found")
+                    test_results.append(False)
+                
+                conn.close()
+                break  # Only need to test one profile's schema
+                
+            except sqlite3.Error as e:
+                print(f"   ✗ Database error: {e}")
+                test_results.append(False)
+                break
+    
+    test_results.append(schema_valid)
+    
+    # Test 5: Write Permission Test
+    print("\n5. Testing Write Permissions...")
+    write_test_passed = True
+    
+    for brave_path in brave_paths:
+        if not brave_path.exists():
+            continue
+            
+        # Test write permission on Brave directory
+        test_file = brave_path / ".write_test"
+        try:
+            test_file.write_text("test")
+            test_file.unlink()
+            print(f"   ✓ Write permission confirmed for: {brave_path}")
+        except (OSError, PermissionError) as e:
+            print(f"   ✗ Write permission denied for: {brave_path}")
+            print(f"      Error: {e}")
+            write_test_passed = False
+        
+        # Test write permission on profile Web Data files
+        profile_dirs = []
+        
+        # Check for Default profile
+        default_profile = brave_path / "Default"
+        if default_profile.exists() and default_profile.is_dir():
+            profile_dirs.append(default_profile)
+        
+        # Check for numbered profiles
+        for item in brave_path.iterdir():
+            if item.is_dir() and item.name.startswith("Profile "):
+                profile_dirs.append(item)
+        
+        # Check for System Profile
+        system_profile = brave_path / "System Profile"
+        if system_profile.exists() and system_profile.is_dir():
+            profile_dirs.append(system_profile)
+        
+        for profile_dir in profile_dirs:
+            web_data_file = profile_dir / "Web Data"
+            if web_data_file.exists():
+                try:
+                    # Test if file is writable
+                    if os.access(str(web_data_file), os.W_OK):
+                        print(f"   ✓ Write permission confirmed for: {profile_dir.name}/Web Data")
+                    else:
+                        print(f"   ✗ Write permission denied for: {profile_dir.name}/Web Data")
+                        write_test_passed = False
+                except OSError as e:
+                    print(f"   ✗ Cannot check write permission for: {profile_dir.name}/Web Data")
+                    print(f"      Error: {e}")
+                    write_test_passed = False
+    
+    test_results.append(write_test_passed)
+    
+    # Final Assessment
+    print("\n" + "=" * 80)
+    print("SMOKE TEST RESULTS")
+    print("=" * 80)
+    
+    all_tests_passed = all(test_results)
+    
+    if all_tests_passed:
+        print("✓ ALL TESTS PASSED")
+        print("\nASSESSMENT: NO PROBLEMS FOUND")
+        print("The tool should work correctly on this system.")
+    else:
+        print("✗ SOME TESTS FAILED")
+        print("\nASSESSMENT: PROBLEMS DETECTED")
+        print("The tool may not work correctly or could cause issues.")
+        print("Please resolve the failed tests before using this tool.")
+    
+    if warnings:
+        print(f"\n⚠ WARNINGS ({len(warnings)}):")
+        for i, warning in enumerate(warnings, 1):
+            print(f"  {i}. {warning}")
+    
+    print("\nTEST SUMMARY:")
+    test_names = [
+        "OS Detection",
+        "Brave Directory Structure", 
+        "Profile Detection",
+        "Command-line Tools",
+        "SQLite Schema",
+        "Write Permissions"
+    ]
+    
+    for i, (test_name, passed) in enumerate(zip(test_names, test_results)):
+        status = "✓ PASS" if passed else "✗ FAIL"
+        print(f"  {test_name}: {status}")
+    
+    print("=" * 80)
+    
+    return all_tests_passed
+
+
+def get_backup_directory_message():
+    """Get the backup directory message for the current OS."""
+    os_name, brave_paths = detect_os()
+    
+    if brave_paths:
+        backup_path = str(brave_paths[0]).replace(str(Path.home()), "~")
+        return f"On this system, back up: {backup_path}"
+    else:
+        return "Back up your Brave browser configuration directory"
+
+
+if __name__ == "__main__":
+    try:
+        check_brave_not_running()
+        args = parse_arguments()
+        
+        if args.profiles:
+            list_brave_profiles()
+        elif args.search_shortcuts:
+            show_search_shortcuts()
+        elif args.combined:
+            show_combined_search_shortcuts()
+        elif args.combined_sync:
+            sync_search_engines_to_all_profiles()
+        elif args.delete:
+            delete_search_engine_from_all_profiles(args.delete)
+        elif args.smoke_test:
+            run_smoke_test()
+        else:
+            # If no arguments provided, show help
+            backup_msg = get_backup_directory_message()
+            parser = argparse.ArgumentParser(
+                description="Brave Browser Search Sync - Manage search engines across Brave browser profiles",
+                formatter_class=argparse.RawDescriptionHelpFormatter,
+                epilog=f"""
+Examples:
+  %(prog)s -p          List all Brave browser profiles
+  %(prog)s -s          Show search engine shortcuts for each profile
+  %(prog)s -c          Show combined search engines from all profiles
+  %(prog)s -cs         Sync newest search engines to all profiles
+  %(prog)s -d :www     Delete search engine with shortcut ':www' from all profiles
+  %(prog)s --smoke-test Run system validation checks
+  %(prog)s -h          Show this help message
+
+This script detects your operating system and lists all Brave browser profiles
+with their actual names (not just directory names).
+
+WARNING: Always back up your Brave browser configuration before using this tool to modify your Brave configuration.
+{backup_msg}
+Use at your own risk.
+                """.strip()
+            )
+            parser.add_argument(
+                '-p', '--profiles',
+                action='store_true',
+                help='List all Brave browser profiles with their names and directories'
+            )
+            parser.add_argument(
+                '-s', '--search-shortcuts',
+                action='store_true',
+                help='Show search engine shortcuts for each profile'
+            )
+            parser.add_argument(
+                '-c', '--combined',
+                action='store_true',
+                help='Show combined search engines from all profiles (most recent version of each shortcut)'
+            )
+            parser.add_argument(
+                '-cs', '--combined-sync',
+                action='store_true',
+                help='Sync newest search engines to all profiles (case-insensitive keyword matching) - CAUTION: Modifies Brave configuration'
+            )
+            parser.add_argument(
+                '-d', '--delete',
+                type=str,
+                metavar='SHORTCUT',
+                help='Delete search engine with specified shortcut from all profiles - CAUTION: Modifies Brave configuration'
+            )
+            parser.add_argument(
+                '--smoke-test',
+                action='store_true',
+                help='Run system validation checks to ensure the tool can operate safely'
+            )
+            parser.print_help()
+            
+    except KeyboardInterrupt:
+        print("\nOperation cancelled by user.")
+        sys.exit(1)
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        sys.exit(1)
