@@ -6,7 +6,7 @@ A Python utility for managing and synchronizing search engines across Brave Brow
 
 ## Current Status
 
-Tested on macOS. I'll check Linux and Windows soon. Open an issue if you test before me and it fails.
+Mostly AI-coded, but humam-reviewed. Tested on macOS. I'll check Linux and Windows soon. Open an issue if you test before me and it fails.
 
 ## TL;DR: Too Long, Didn't Read. Twitter broke my attention span.
 
