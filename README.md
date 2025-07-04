@@ -10,7 +10,11 @@ This tool syncs custom search engine shortcuts across all your Brave browser pro
 
 ## Current Status
 
-Mostly AI-coded, but humam-reviewed. Tested on macOS. I'll check Linux and Windows soon. Open an issue if you test before me and it fails.
+Tested on macOS. I'll check Linux and Windows soon. Open an issue if you test before me and it fails.
+
+Include the --smoke-test option in [bug reports](https://github.com/mcgroarty/brave-search-sync/issues).
+
+Mostly AI-coded, but humam-reviewed.
 
 ## Overview
 
