@@ -654,6 +654,89 @@ def get_existing_keywords_case_insensitive(profile_path):
     return keywords
 
 
+def get_existing_search_engines_with_metadata(profile_path):
+    """Get existing search engines with metadata from a profile for comparison and updating."""
+    web_data_file = profile_path / "Web Data"
+    search_engines = {}
+    
+    if not web_data_file.exists():
+        return search_engines
+    
+    try:
+        conn = sqlite3.connect(str(web_data_file))
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT short_name, keyword, url, last_modified, favicon_url, usage_count, prepopulate_id, id
+            FROM keywords 
+            WHERE keyword != '' AND keyword IS NOT NULL
+        """)
+        
+        for row in cursor.fetchall():
+            short_name, keyword, url, last_modified, favicon_url, usage_count, prepopulate_id, record_id = row
+            if keyword:
+                search_engines[keyword.lower()] = {
+                    'id': record_id,
+                    'name': short_name,
+                    'keyword': keyword,
+                    'url': url,
+                    'last_modified': last_modified or 0,
+                    'favicon_url': favicon_url or '',
+                    'usage_count': usage_count or 0,
+                    'prepopulate_id': prepopulate_id or 0
+                }
+        
+        conn.close()
+    except (sqlite3.Error, OSError):
+        pass
+    
+    return search_engines
+
+
+def update_search_engine(profile_path, search_engine, existing_id):
+    """Update an existing search engine in a profile's database."""
+    web_data_file = profile_path / "Web Data"
+    
+    if not web_data_file.exists():
+        return False
+    
+    conn = None
+    try:
+        conn = sqlite3.connect(str(web_data_file))
+        cursor = conn.cursor()
+        
+        # Generate current WebKit timestamp for last_modified
+        # This is important for Brave's sync mechanism to detect changes
+        import time
+        current_webkit_time = unix_to_webkit_timestamp(time.time())
+        
+        # Update the search engine with current timestamp
+        cursor.execute("""
+            UPDATE keywords SET
+                short_name = ?, url = ?, favicon_url = ?, last_modified = ?
+            WHERE id = ?
+        """, (
+            search_engine['name'],
+            search_engine['url'],
+            search_engine['favicon_url'],
+            current_webkit_time,
+            existing_id
+        ))
+        
+        conn.commit()
+        return True
+        
+    except (sqlite3.Error, OSError) as e:
+        print(f"    Error updating search engine: {e}")
+        return False
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except sqlite3.Error:
+                pass
+
+
 def insert_search_engine(profile_path, search_engine):
     """Insert a search engine into a profile's database."""
     web_data_file = profile_path / "Web Data"
@@ -860,6 +943,7 @@ def sync_search_engines_to_all_profiles():
     
     # Now sync to each profile
     total_added = 0
+    total_updated = 0
     
     for profile_dir, profile_name in all_profiles:
         # Check if Web Data file exists before attempting to sync
@@ -870,14 +954,37 @@ def sync_search_engines_to_all_profiles():
             
         print(f"Syncing to profile: {profile_name}")
         
-        # Get existing keywords (case-insensitive)
-        existing_keywords = get_existing_keywords_case_insensitive(profile_dir)
+        # Get existing search engines with metadata for comparison
+        existing_search_engines = get_existing_search_engines_with_metadata(profile_dir)
         
         added_count = 0
+        updated_count = 0
+        
         for _, search_engine in combined_shortcuts.items():
             keyword_lower = search_engine['keyword'].lower()
-            # Check if this keyword already exists (case-insensitive)
-            if keyword_lower not in existing_keywords:
+            
+            if keyword_lower in existing_search_engines:
+                # Search engine exists - check if it needs updating
+                existing_engine = existing_search_engines[keyword_lower]
+                
+                # Compare to see if the newer version is different (ignore timestamps)
+                needs_update = (
+                    search_engine['name'] != existing_engine['name'] or
+                    search_engine['url'] != existing_engine['url'] or
+                    search_engine['favicon_url'] != existing_engine['favicon_url']
+                )
+                
+                if needs_update:
+                    success = update_search_engine(profile_dir, search_engine, existing_engine['id'])
+                    if success:
+                        print(f"  ~ Updated: {search_engine['name']} ({search_engine['keyword']})")
+                        updated_count += 1
+                    else:
+                        print(f"  ! Failed to update: {search_engine['name']} ({search_engine['keyword']})")
+                # If no update needed, don't print anything to avoid clutter
+                
+            else:
+                # Search engine doesn't exist - add it
                 success = insert_search_engine(profile_dir, search_engine)
                 if success:
                     print(f"  + Added: {search_engine['name']} ({search_engine['keyword']})")
@@ -885,16 +992,31 @@ def sync_search_engines_to_all_profiles():
                 else:
                     print(f"  ! Failed to add: {search_engine['name']} ({search_engine['keyword']})")
         
-        if added_count == 0:
-            print("  - No new search engines added (all already exist)")
+        if added_count == 0 and updated_count == 0:
+            print("  - No changes needed (all search engines are up to date)")
         else:
-            print(f"  ✓ Added {added_count} new search engines")
+            changes = []
+            if added_count > 0:
+                changes.append(f"added {added_count}")
+            if updated_count > 0:
+                changes.append(f"updated {updated_count}")
+            print(f"  ✓ {' and '.join(changes)} search engines")
         
         total_added += added_count
+        total_updated += updated_count
         print()
     
     print("=" * 80)
-    print(f"SYNC COMPLETE: Added {total_added} search engines total across all profiles")
+    summary_parts = []
+    if total_added > 0:
+        summary_parts.append(f"Added {total_added} search engines")
+    if total_updated > 0:
+        summary_parts.append(f"Updated {total_updated} search engines")
+    
+    if summary_parts:
+        print(f"SYNC COMPLETE: {' and '.join(summary_parts)} total across all profiles")
+    else:
+        print("SYNC COMPLETE: No changes needed - all search engines are up to date")
     print("=" * 80)
 
 
