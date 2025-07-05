@@ -1,25 +1,25 @@
-# brave-search-sync
+# chromium-search-sync
 
-A Python utility for managing and synchronizing search engines across Brave Browser profiles.
+A Python utility for managing and synchronizing search engines across Chromium-based browser profiles (Brave and Chrome).
 
-**Project Home**: [https://github.com/mcgroarty/brave-search-sync](https://github.com/mcgroarty/brave-search-sync)
+**Project Home**: [https://github.com/mcgroarty/chromium-search-sync](https://github.com/mcgroarty/chromium-search-sync)
 
-This project is not affiliated with Brave Software.
+This project is not affiliated with Brave Software or Google.
 
 ## TL;DR: Too Long, Didn't Read. Twitter broke my attention span.
 
-This tool syncs custom search engine shortcuts across all your Brave browser profiles.
+This tool syncs custom search engine shortcuts across all your Chromium-based browser profiles (Brave and Chrome).
 
 **Quick Start:**
 
-1. Clone this repository or download the `brave-search-sync` script
-2. Close Brave completely
-3. Run `./brave-search-sync --smoke-test` to verify system compatibility
-4. Run `./brave-search-sync -c` for a dry run preview of what will be synced
-5. Run `./brave-search-sync -cs` to sync everything
-6. Reopen Brave and visit `brave://settings/search` in each profile to activate the newly added search engines
+1. Clone this repository or download the `chromium-search-sync` script
+2. Close all Chromium browsers completely (Brave and Chrome)
+3. Run `./chromium-search-sync --smoke-test` to verify system compatibility
+4. Run `./chromium-search-sync -c` for a dry run preview of what will be synced
+5. Run `./chromium-search-sync -cs` to sync everything
+6. Reopen your browsers and visit `chrome://settings/search` (Chrome) or `brave://settings/search` (Brave) in each profile to activate the newly added search engines
 
-**Safety:** Always backup your Brave config first (location shown in help with `-h`). The tool won't run if Brave is open and includes built-in protections against deleting essential search engines.
+**Safety:** Always backup your browser configs first (locations shown in help with `-h`). The tool won't run if browsers are open and includes built-in protections against deleting essential search engines.
 
 ## Current Status
 
@@ -29,17 +29,17 @@ This tool syncs custom search engine shortcuts across all your Brave browser pro
 
 **Development:** Mostly AI-coded, but extensively human-reviewed and tested
 
-**Bug Reports:** Include `--smoke-test` output when reporting issues on [GitHub](https://github.com/mcgroarty/brave-search-sync/issues)
+**Bug Reports:** Include `--smoke-test` output when reporting issues on [GitHub](https://github.com/mcgroarty/chromium-search-sync/issues)
 
 ## Overview
 
-**brave-search-sync** is a cross-platform command-line tool that helps you manage custom search engines across multiple Brave Browser profiles. If you use multiple profiles and want to keep your search engine shortcuts synchronized, this tool automates the process by reading from and writing to Brave's SQLite databases.
+**chromium-search-sync** is a cross-platform command-line tool that helps you manage custom search engines across multiple Chromium-based browser profiles (Brave and Chrome). If you use multiple profiles across different browsers and want to keep your search engine shortcuts synchronized, this tool automates the process by reading from and writing to the browsers' SQLite databases.
 
 ## Purpose
 
-When you have multiple Brave Browser profiles (personal, work, hobby, etc.), manually keeping custom search engine shortcuts in sync becomes tedious. This tool solves that problem by:
+When you have multiple Chromium-based browser profiles (Brave and Chrome across personal, work, hobby, etc.), manually keeping custom search engine shortcuts in sync becomes tedious. This tool solves that problem by:
 
-- **Discovering all profiles** automatically across different operating systems
+- **Discovering all profiles** automatically across different browsers and operating systems
 - **Reading search engines** from each profile's database
 - **Synchronizing shortcuts** by copying the newest version to all profiles
 - **Managing shortcuts** through command-line operations
@@ -49,7 +49,8 @@ When you have multiple Brave Browser profiles (personal, work, hobby, etc.), man
 ### Core Functionality
 
 - **Cross-platform support**: Works on macOS, Linux, and Windows via Cygwin (Cygwin required on Windows)
-- **Profile discovery**: Automatically finds all Brave profiles (Default, Profile 1-N, System Profile)
+- **Multi-browser support**: Automatically detects and manages both Brave and Chrome browsers
+- **Profile discovery**: Automatically finds all browser profiles (Default, Profile 1-N, System Profile)
 - **Search engine listing**: View shortcuts for individual profiles or combined across all profiles
 - **Intelligent syncing**: Copies the most recent version of each shortcut to all profiles
 - **Safe deletion**: Remove shortcuts from all profiles with built-in protections
@@ -59,11 +60,11 @@ When you have multiple Brave Browser profiles (personal, work, hobby, etc.), man
 
 The tool includes multiple safety mechanisms to protect your data:
 
-- **Process Detection**: Automatically detects if Brave is running and refuses to proceed if it is
+- **Process Detection**: Automatically detects if Brave or Chrome is running and refuses to proceed if either is
 - **Permission Validation**: Checks write permissions before attempting any modifications
 - **Built-in Search Engine Protection**: Prevents deletion of essential search engines (Google, DuckDuckGo, Brave Search)
 - **Database Integrity**: Uses atomic transactions to prevent database corruption
-- **Backup Reminders**: Consistently reminds users to backup their configuration
+- **Backup Reminders**: Consistently reminds users to backup their configurations
 - **Comprehensive Testing**: The `--smoke-test` option validates system compatibility before use
 - **Error handling**: Graceful handling of database locks and permission issues
 
@@ -71,7 +72,7 @@ The tool includes multiple safety mechanisms to protect your data:
 
 ### Database Structure
 
-Brave stores search engines in SQLite databases located in each profile's `Web Data` file. The tool directly accesses the `keywords` table which contains:
+Both Brave and Chrome store search engines in SQLite databases located in each profile's `Web Data` file. The tool directly accesses the `keywords` table which contains:
 
 - **short_name**: Display name (e.g., "Google", "DuckDuckGo")
 - **keyword**: Shortcut keyword (e.g., ":g", ":d", "csr")  
@@ -81,7 +82,7 @@ Brave stores search engines in SQLite databases located in each profile's `Web D
 
 ### Synchronization Logic
 
-1. **Discovery**: Finds all Brave profiles on the system
+1. **Discovery**: Finds all Brave and Chrome profiles on the system
 2. **Collection**: Reads search engines from each profile's database
 3. **Comparison**: Identifies the most recent version of each shortcut keyword (case-insensitive)
 4. **Synchronization**: Copies missing shortcuts to profiles that don't have them
@@ -89,26 +90,26 @@ Brave stores search engines in SQLite databases located in each profile's `Web D
 
 The tool uses the `last_modified` timestamp to determine which version of a search engine is newest when the same keyword exists in multiple profiles.
 
-**Note**: After synchronization, newly added search engines will appear in the "Other search engines" section of each profile's search settings (`brave://settings/search`). You need to visit this page in each profile to activate them for use.
+**Note**: After synchronization, newly added search engines will appear in the "Other search engines" section of each profile's search settings (`chrome://settings/search` for Chrome or `brave://settings/search` for Brave). You need to visit this page in each profile to activate them for use.
 
 ## Installation
 
-Clone this repository or download the standalone `brave-search-sync` script. No further installation is required.
+Clone this repository or download the standalone `chromium-search-sync` script. No further installation is required.
 
 **Requirements:**
 
 - Python 3.6+ (uses pathlib and f-strings)
 - Standard library only (no external dependencies)
-- Brave browser installed and run at least once
+- Brave and/or Chrome browser installed and run at least once
 
 **File Permissions:**
 
-The script requires write permissions to Brave's configuration directory to modify search engine databases. The script will check permissions during the smoke test and before making any changes.
+The script requires write permissions to the browsers' configuration directories to modify search engine databases. The script will check permissions during the smoke test and before making any changes.
 
 **Making the Script Executable:**
 
 ```bash
-chmod +x brave-search-sync
+chmod +x chromium-search-sync
 ```
 
 **Alternative Execution:**
@@ -116,7 +117,7 @@ chmod +x brave-search-sync
 If you prefer not to make it executable, you can run it with Python directly:
 
 ```bash
-python3 brave-search-sync [options]
+python3 chromium-search-sync [options]
 ```
 
 ## Usage
@@ -127,11 +128,11 @@ The script supports the following command-line options:
 
 | Option | Long Form | Description |
 |--------|-----------|-------------|
-| `-p` | `--profiles` | List all Brave browser profiles with their names and directories |
+| `-p` | `--profiles` | List all Brave and Chrome browser profiles with their names and directories |
 | `-s` | `--search-shortcuts` | Show search engine shortcuts for each profile |
 | `-c` | `--combined` | Show combined search engines from all profiles (most recent version of each shortcut) |
-| `-cs` | `--combined-sync` | Sync newest search engines to all profiles (case-insensitive keyword matching) - **CAUTION: Modifies Brave configuration** |
-| `-d SHORTCUT` | `--delete SHORTCUT` | Delete search engine with specified shortcut from all profiles - **CAUTION: Modifies Brave configuration** |
+| `-cs` | `--combined-sync` | Sync newest search engines to all profiles (case-insensitive keyword matching) - **CAUTION: Modifies browser configurations** |
+| `-d SHORTCUT` | `--delete SHORTCUT` | Delete search engine with specified shortcut from all profiles - **CAUTION: Modifies browser configurations** |
 | | `--smoke-test` | Run system validation checks to ensure the tool can operate safely |
 | `-h` | `--help` | Show help message and exit |
 
@@ -140,43 +141,43 @@ The script supports the following command-line options:
 **List all profiles:**
 
 ```bash
-./brave-search-sync -p
+./chromium-search-sync -p
 ```
 
 **Show search shortcuts for each profile:**
 
 ```bash
-./brave-search-sync -s
+./chromium-search-sync -s
 ```
 
 **Show combined search engines (dry run preview):**
 
 ```bash
-./brave-search-sync -c
+./chromium-search-sync -c
 ```
 
 **Sync newest search engines to all profiles:**
 
 ```bash
-./brave-search-sync -cs
+./chromium-search-sync -cs
 ```
 
 **Delete a specific search engine shortcut:**
 
 ```bash
-./brave-search-sync -d :shortcut
+./chromium-search-sync -d :shortcut
 ```
 
 **Run system validation checks:**
 
 ```bash
-./brave-search-sync --smoke-test
+./chromium-search-sync --smoke-test
 ```
 
 **Show help:**
 
 ```bash
-./brave-search-sync -h
+./chromium-search-sync -h
 ```
 
 ### Example Workflow
@@ -184,41 +185,48 @@ The script supports the following command-line options:
 1. **Check your profiles:**
 
    ```bash
-   ./brave-search-sync -p
+   ./chromium-search-sync -p
    ```
 
 2. **See what search engines you have:**
 
    ```bash
-   ./brave-search-sync -s
+   ./chromium-search-sync -s
    ```
 
 3. **View the combined list (most recent versions):**
 
    ```bash
-   ./brave-search-sync -c
+   ./chromium-search-sync -c
    ```
 
 4. **Sync everything:**
 
    ```bash
-   ./brave-search-sync -cs
+   ./chromium-search-sync -cs
    ```
 
 5. **Activate new search engines:**
-   After synchronization, you need to visit `brave://settings/search` in each profile to activate the newly added search engines. They will appear in the "Other search engines" section and can be activated by clicking on them.
+   After synchronization, you need to visit the search settings page in each profile to activate the newly added search engines:
+   - Chrome: `chrome://settings/search`
+   - Brave: `brave://settings/search`
+   
+   They will appear in the "Other search engines" section and can be activated by clicking on them.
 
 ## Important Notes
 
 ### Database Locking
 
-- **Always close Brave completely** before running this tool
-- The script will check for running Brave processes and refuse to run if any are detected
-- Database files are locked while Brave is running, preventing safe modifications
+- **Always close all browsers completely** before running this tool (both Brave and Chrome)
+- The script will check for running browser processes and refuse to run if any are detected
+- Database files are locked while browsers are running, preventing safe modifications
 
 ### Search Engine Activation
 
-After running `-cs` (sync), newly added search engines will appear in the "Other search engines" section of each profile's search settings. You must visit `brave://settings/search` in each profile to activate them for use in the address bar.
+After running `-cs` (sync), newly added search engines will appear in the "Other search engines" section of each profile's search settings. You must visit the search settings page in each profile to activate them for use in the address bar:
+
+- Chrome: `chrome://settings/search`
+- Brave: `brave://settings/search`
 
 ### Case-Insensitive Matching
 
@@ -243,9 +251,15 @@ Each function has a clear, single responsibility:
 
 The tool centralizes OS-specific logic in `detect_os()` and uses `pathlib` for cross-platform path handling, supporting:
 
-- **macOS**: `~/Library/Application Support/BraveSoftware/Brave-Browser`
-- **Linux**: `~/.config/BraveSoftware/Brave-Browser`
-- **Windows (Cygwin required)**: `~/AppData/Local/BraveSoftware/Brave-Browser`
+- **macOS**:
+  - Brave: `~/Library/Application Support/BraveSoftware/Brave-Browser`
+  - Chrome: `~/Library/Application Support/Google/Chrome`
+- **Linux**:
+  - Brave: `~/.config/BraveSoftware/Brave-Browser`
+  - Chrome: `~/.config/google-chrome`
+- **Windows (Cygwin required)**:
+  - Brave: `~/AppData/Local/BraveSoftware/Brave-Browser`
+  - Chrome: `~/AppData/Local/Google/Chrome/User Data`
 
 ### Error Handling
 
@@ -287,14 +301,14 @@ Intelligently discovers profiles through:
 
 ### Process Detection
 
-The tool uses the `ps` command to detect running Brave processes and will refuse to run if Brave is active. This prevents database corruption and ensures safe operation.
+The tool uses the `ps` command to detect running browser processes (both Brave and Chrome) and will refuse to run if any are active. This prevents database corruption and ensures safe operation.
 
 ### Smoke Test Features
 
 The `--smoke-test` option performs comprehensive validation:
 
 - OS detection and path validation
-- Brave directory structure verification
+- Browser directory structure verification
 - Profile discovery testing
 - SQLite database schema validation
 - Write permission checks
@@ -306,29 +320,35 @@ Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE) for detai
 
 ## Warnings
 
-⚠️ **Always backup your Brave browser configuration before using this tool.**
+⚠️ **Always backup your browser configurations before using this tool.**
 
-⚠️ **Close Brave completely before running this tool.**
+⚠️ **Close all browsers completely before running this tool.**
 
-⚠️ **Use at your own risk - this tool modifies Brave's configuration files.**
+⚠️ **Use at your own risk - this tool modifies browser configuration files.**
 
-⚠️ **The tool will check for running Brave processes and refuse to run if any are detected.**
+⚠️ **The tool will check for running browser processes and refuse to run if any are detected.**
 
 ## Backup Locations
 
-- **macOS**: `~/Library/Application Support/BraveSoftware/Brave-Browser`
-- **Linux**: `~/.config/BraveSoftware/Brave-Browser`  
-- **Windows (Cygwin required)**: `~/AppData/Local/BraveSoftware/Brave-Browser`
+- **macOS**:
+  - Brave: `~/Library/Application Support/BraveSoftware/Brave-Browser`
+  - Chrome: `~/Library/Application Support/Google/Chrome`
+- **Linux**:
+  - Brave: `~/.config/BraveSoftware/Brave-Browser`
+  - Chrome: `~/.config/google-chrome`
+- **Windows (Cygwin required)**:
+  - Brave: `~/AppData/Local/BraveSoftware/Brave-Browser`
+  - Chrome: `~/AppData/Local/Google/Chrome/User Data`
 
 ## Troubleshooting
 
-### "Brave Browser is currently running" Error
+### "Browser is currently running" Error
 
 If you get this error, make sure to:
 
-1. Quit Brave normally (Cmd+Q on macOS, Ctrl+Q on Linux/Windows)
+1. Quit all browsers normally (Cmd+Q on macOS, Ctrl+Q on Linux/Windows)
 2. Wait a few seconds for all processes to terminate
-3. Or use: `pkill -f brave` to force quit
+3. Or use: `pkill -f brave` or `pkill -f chrome` to force quit
 4. Run the script again
 
 ### Permission Denied Errors
@@ -336,23 +356,23 @@ If you get this error, make sure to:
 Run the smoke test first to check permissions:
 
 ```bash
-./brave-search-sync --smoke-test
+./chromium-search-sync --smoke-test
 ```
 
-Ensure you have write permissions to the Brave configuration directory.
+Ensure you have write permissions to the browser configuration directories.
 
 ### Database Locked Errors
 
-This usually means Brave is still running. Make sure all Brave processes are closed before running the tool.
+This usually means a browser is still running. Make sure all browser processes are closed before running the tool.
 
 ### No Profiles Found
 
 Make sure:
 
-1. Brave is installed and has been run at least once
-2. You have the correct Brave installation (not Brave Beta or Brave Nightly)
+1. Brave and/or Chrome is installed and has been run at least once
+2. You have the correct browser installation (not Beta or Nightly versions)
 3. Your OS is supported (macOS, Linux, Windows)
 
 ## Contributing
 
-Feel free to submit issues, feature requests, or pull requests on the [GitHub repository](https://github.com/mcgroarty/brave-search-sync).
+Feel free to submit issues, feature requests, or pull requests on the [GitHub repository](https://github.com/mcgroarty/chromium-search-sync).
