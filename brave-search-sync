@@ -553,15 +553,41 @@ def check_brave_not_running():
             'Brave-Browser'
         ]
         
+        # Get current script name to avoid detecting ourselves
+        current_script = Path(__file__).name if __file__ else 'brave-search-sync'
+        
         for line in result.stdout.split('\n'):
             # Skip helper processes and other non-main processes
             if 'Helper' in line or 'Renderer' in line or 'GPU' in line:
                 continue
                 
+            # Skip this script itself
+            if current_script in line:
+                continue
+                
+            # Skip other scripts that might contain "brave" in their name
+            # But only if they have script extensions AND contain "brave"
+            if any(ext in line for ext in ['.py', '.sh', '.rb', '.js', '.pl']) and 'brave' in line.lower():
+                continue
+                
+            # For the generic "brave" pattern, be more careful to avoid false positives
             # Check if any brave pattern matches (case-insensitive)
             line_lower = line.lower()
             for pattern in brave_patterns:
-                if pattern.lower() in line_lower:
+                pattern_lower = pattern.lower()
+                if pattern_lower in line_lower:
+                    # Special handling for the generic "brave" pattern
+                    if pattern_lower == 'brave':
+                        # Make sure it's not just part of a longer word like "brave-search-sync"
+                        # Look for "brave" as a standalone word or as part of a path
+                        import re
+                        # Match "brave" as a standalone executable or in a path
+                        if re.search(r'\b/.*?brave\b|\bbrave\b(?!\S)', line_lower):
+                            pass  # This looks like a legitimate brave process
+                        else:
+                            continue  # Skip this match as it's likely a false positive
+                    
+                    # If we get here, we found a match
                     # Extract process name and PID for display
                     parts = line.split()
                     if len(parts) >= 2:
