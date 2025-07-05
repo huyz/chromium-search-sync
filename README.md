@@ -14,7 +14,7 @@ Tested on macOS and Linux. Windows support requires running this script from the
 
 Include the --smoke-test option in [bug reports](https://github.com/mcgroarty/brave-search-sync/issues).
 
-Mostly AI-coded, but human-reviewed.
+Mostly AI-coded, but humam-reviewed.
 
 ## Overview
 
@@ -264,6 +264,39 @@ Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE) for detai
 - **macOS**: `~/Library/Application Support/BraveSoftware/Brave-Browser`
 - **Linux**: `~/.config/BraveSoftware/Brave-Browser`  
 - **Windows (Cygwin required)**: `~/AppData/Local/BraveSoftware/Brave-Browser`
+
+## Troubleshooting
+
+### "Brave Browser is currently running" Error
+
+If you get this error, make sure to:
+
+1. Quit Brave normally (Cmd+Q on macOS, Ctrl+Q on Linux/Windows)
+2. Wait a few seconds for all processes to terminate
+3. Or use: `pkill -f brave` to force quit
+4. Run the script again
+
+### Permission Denied Errors
+
+Run the smoke test first to check permissions:
+
+```bash
+./brave-search-sync --smoke-test
+```
+
+Ensure you have write permissions to the Brave configuration directory.
+
+### Database Locked Errors
+
+This usually means Brave is still running. Make sure all Brave processes are closed before running the tool.
+
+### No Profiles Found
+
+Make sure:
+
+1. Brave is installed and has been run at least once
+2. You have the correct Brave installation (not Brave Beta or Brave Nightly)
+3. Your OS is supported (macOS, Linux, Windows)
 
 ## Troubleshooting
 
