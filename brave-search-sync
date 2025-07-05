@@ -497,15 +497,15 @@ def show_combined_search_shortcuts():
         for profile_dir in profile_dirs:
             profile_name = get_profile_name(profile_dir, profile_names_cache)
             shortcuts = get_search_shortcuts_with_metadata(profile_dir, profile_name)
-            
-            # Process each shortcut
+
+            # Process each shortcut (use lowercase key to avoid case collisions)
             for shortcut in shortcuts:
-                keyword = shortcut['keyword']
-                
-                # If we haven't seen this keyword before, or if this version is newer
-                if (keyword not in combined_shortcuts or 
-                    shortcut['last_modified'] > combined_shortcuts[keyword]['last_modified']):
-                    combined_shortcuts[keyword] = shortcut
+                keyword_lower = shortcut['keyword'].lower()
+
+                # If we haven't seen this keyword before (case-insensitive), or if this version is newer
+                if (keyword_lower not in combined_shortcuts or
+                    shortcut['last_modified'] > combined_shortcuts[keyword_lower]['last_modified']):
+                    combined_shortcuts[keyword_lower] = shortcut
     
     if not profiles_found:
         print("\nNo Brave profiles found on this system.")
@@ -524,11 +524,10 @@ def show_combined_search_shortcuts():
     print(f"{'Name':<25} {'Shortcut':<12} {'URL':<35} {'Source Profile':<18}")
     print("-" * 100)
     
-    # Print shortcuts sorted by keyword
-    for keyword in sorted(combined_shortcuts.keys()):
-        shortcut = combined_shortcuts[keyword]
+    # Print shortcuts sorted by keyword (case-insensitive)
+    for keyword_lower, shortcut in sorted(combined_shortcuts.items(), key=lambda x: x[1]['keyword'].lower()):
         name = shortcut['name'][:24] if len(shortcut['name']) > 24 else shortcut['name']
-        keyword_display = keyword[:11] if len(keyword) > 11 else keyword
+        keyword_display = shortcut['keyword'][:11] if len(shortcut['keyword']) > 11 else shortcut['keyword']
         url = shortcut['url'][:34] if len(shortcut['url']) > 34 else shortcut['url']
         profile = shortcut['profile_name'][:17] if len(shortcut['profile_name']) > 17 else shortcut['profile_name']
         
@@ -767,17 +766,17 @@ def sync_search_engines_to_all_profiles():
         for profile_dir in profile_dirs:
             profile_name = get_profile_name(profile_dir, profile_names_cache)
             all_profiles.append((profile_dir, profile_name))
-            
+
             shortcuts = get_search_shortcuts_with_metadata(profile_dir, profile_name)
-            
-            # Process each shortcut to find the newest version
+
+            # Process each shortcut to find the newest version (case-insensitive)
             for shortcut in shortcuts:
-                keyword = shortcut['keyword']
-                
+                keyword_lower = shortcut['keyword'].lower()
+
                 # If we haven't seen this keyword before, or if this version is newer
-                if (keyword not in combined_shortcuts or 
-                    shortcut['last_modified'] > combined_shortcuts[keyword]['last_modified']):
-                    combined_shortcuts[keyword] = shortcut
+                if (keyword_lower not in combined_shortcuts or
+                    shortcut['last_modified'] > combined_shortcuts[keyword_lower]['last_modified']):
+                    combined_shortcuts[keyword_lower] = shortcut
     
     if not all_profiles:
         print("No Brave profiles found on this system.")
@@ -807,15 +806,16 @@ def sync_search_engines_to_all_profiles():
         existing_keywords = get_existing_keywords_case_insensitive(profile_dir)
         
         added_count = 0
-        for keyword, search_engine in combined_shortcuts.items():
+        for _, search_engine in combined_shortcuts.items():
+            keyword_lower = search_engine['keyword'].lower()
             # Check if this keyword already exists (case-insensitive)
-            if keyword.lower() not in existing_keywords:
+            if keyword_lower not in existing_keywords:
                 success = insert_search_engine(profile_dir, search_engine)
                 if success:
-                    print(f"  + Added: {search_engine['name']} ({keyword})")
+                    print(f"  + Added: {search_engine['name']} ({search_engine['keyword']})")
                     added_count += 1
                 else:
-                    print(f"  ! Failed to add: {search_engine['name']} ({keyword})")
+                    print(f"  ! Failed to add: {search_engine['name']} ({search_engine['keyword']})")
         
         if added_count == 0:
             print("  - No new search engines added (all already exist)")
