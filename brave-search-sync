@@ -543,19 +543,38 @@ def check_brave_not_running():
         import subprocess
         result = subprocess.run(['ps', 'aux'], capture_output=True, text=True, check=True)
         
-        # Look for Brave browser processes
+        # Look for Brave browser processes with multiple possible names
         brave_processes = []
+        brave_patterns = [
+            'Brave Browser',
+            'brave-browser', 
+            'brave',
+            'BraveSoftware',
+            'Brave-Browser'
+        ]
+        
         for line in result.stdout.split('\n'):
-            if 'Brave Browser' in line and 'Helper' not in line:
-                # Extract process name and PID for display
-                parts = line.split()
-                if len(parts) >= 2:
-                    pid = parts[1]
-                    # Find the command part
-                    cmd_start = line.find('Brave Browser')
-                    if cmd_start != -1:
-                        cmd = line[cmd_start:].split()[0:2]  # Get "Brave Browser"
-                        brave_processes.append(f"PID {pid}: {' '.join(cmd)}")
+            # Skip helper processes and other non-main processes
+            if 'Helper' in line or 'Renderer' in line or 'GPU' in line:
+                continue
+                
+            # Check if any brave pattern matches (case-insensitive)
+            line_lower = line.lower()
+            for pattern in brave_patterns:
+                if pattern.lower() in line_lower:
+                    # Extract process name and PID for display
+                    parts = line.split()
+                    if len(parts) >= 2:
+                        pid = parts[1]
+                        # Find the command part - be more flexible with extraction
+                        cmd_parts = []
+                        for part in parts[10:]:  # Skip standard ps columns
+                            cmd_parts.append(part)
+                            if len(cmd_parts) >= 2:  # Limit to prevent overly long output
+                                break
+                        cmd = ' '.join(cmd_parts) if cmd_parts else 'Unknown Command'
+                        brave_processes.append(f"PID {pid}: {cmd}")
+                    break  # Found a match, no need to check other patterns
         
         if brave_processes:
             print("ERROR: Brave Browser is currently running!")
@@ -565,8 +584,8 @@ def check_brave_not_running():
             for process in brave_processes:
                 print(f"  - {process}")
             print("\nTo close Brave:")
-            print("  1. Quit Brave normally (Cmd+Q on macOS)")
-            print("  2. Or use: pkill -f 'Brave Browser'")
+            print("  1. Quit Brave normally (Cmd+Q on macOS, Ctrl+Q on Linux)")
+            print("  2. Or use: pkill -f brave")
             print("  3. Wait a few seconds, then run this script again")
             sys.exit(1)
             
@@ -616,6 +635,7 @@ def insert_search_engine(profile_path, search_engine):
     if not web_data_file.exists():
         return False
     
+    conn = None
     try:
         conn = sqlite3.connect(str(web_data_file))
         cursor = conn.cursor()
@@ -665,12 +685,18 @@ def insert_search_engine(profile_path, search_engine):
         ))
         
         conn.commit()
-        conn.close()
         return True
         
     except (sqlite3.Error, OSError) as e:
         print(f"    Error inserting search engine: {e}")
         return False
+    finally:
+        # Ensure connection is always closed, even if an exception occurs
+        if conn:
+            try:
+                conn.close()
+            except sqlite3.Error:
+                pass  # Ignore errors when closing connection
         
 
 def delete_search_engine(profile_path, shortcut_keyword):
@@ -680,9 +706,13 @@ def delete_search_engine(profile_path, shortcut_keyword):
     if not web_data_file.exists():
         return False, "Web Data file not found"
     
+    conn = None
     try:
         conn = sqlite3.connect(str(web_data_file))
         cursor = conn.cursor()
+        
+        # Use a transaction to ensure atomicity and prevent race conditions
+        conn.execute('BEGIN IMMEDIATE')
         
         # First, check if the keyword exists and get its details
         cursor.execute("""
@@ -693,30 +723,41 @@ def delete_search_engine(profile_path, shortcut_keyword):
         
         result = cursor.fetchone()
         if not result:
-            conn.close()
+            conn.rollback()
             return False, "Shortcut not found"
         
         short_name, keyword, prepopulate_id = result
         
         # Check if it's a built-in search engine (generally shouldn't be deleted)
         if prepopulate_id and prepopulate_id > 0:
-            conn.close()
+            conn.rollback()
             return False, f"Built-in search engine (prepopulate_id: {prepopulate_id}) - deletion not recommended"
         
-        # Delete the search engine
+        # Delete the search engine atomically within the same transaction
         cursor.execute("DELETE FROM keywords WHERE keyword = ? COLLATE NOCASE", (shortcut_keyword,))
         deleted_count = cursor.rowcount
         
-        conn.commit()
-        conn.close()
-        
         if deleted_count > 0:
+            conn.commit()
             return True, f"Deleted '{short_name}' ({keyword})"
         else:
+            conn.rollback()
             return False, "No rows deleted"
         
     except (sqlite3.Error, OSError) as e:
+        if conn:
+            try:
+                conn.rollback()
+            except sqlite3.Error:
+                pass  # Ignore rollback errors
         return False, f"Database error: {e}"
+    finally:
+        # Ensure connection is always closed, even if an exception occurs
+        if conn:
+            try:
+                conn.close()
+            except sqlite3.Error:
+                pass  # Ignore errors when closing connection
 
 
 def sync_search_engines_to_all_profiles():
