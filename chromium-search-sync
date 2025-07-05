@@ -31,6 +31,7 @@ FUNCTIONALITY:
 - Lists search engine shortcuts for each profile or combined across all profiles
 - Syncs newest search engines to all profiles with case-insensitive keyword matching
 - Deletes specified search engine shortcuts from all profiles (with built-in protection)
+- Filters out browser-specific URLs (brave://, chrome://) to prevent cross-browser conflicts
 
 REQUIREMENTS:
 - Python 3.6+ (uses pathlib and f-strings)
@@ -166,6 +167,15 @@ def detect_os():
     return os_name, browser_paths
 
 
+def is_browser_specific_url(url):
+    """Check if a URL is browser-specific (brave:// or chrome://)."""
+    if not url:
+        return False
+    
+    url_lower = url.lower()
+    return url_lower.startswith('brave://') or url_lower.startswith('chrome://')
+
+
 def get_profile_names_from_local_state(browser_path):
     """Get profile names from the Local State file."""
     local_state_file = browser_path / "Local State"
@@ -298,7 +308,7 @@ def parse_arguments():
 Examples:
   %(prog)s -p          List all Brave and Chrome browser profiles
   %(prog)s -s          Show search engine shortcuts for each profile
-  %(prog)s -c          Show combined search engines from all profiles (most recent version of each shortcut)
+  %(prog)s -c          Show combined search engines from all profiles (displays all versions when shortcuts differ)
   %(prog)s -cs         Sync newest search engines to all profiles
   %(prog)s -d :www     Delete search engine with shortcut ':www' from all profiles
   %(prog)s --smoke-test Run system validation checks
@@ -328,7 +338,7 @@ Use at your own risk.
     parser.add_argument(
         '-c', '--combined',
         action='store_true',
-        help='Show combined search engines from all profiles (most recent version of each shortcut)'
+        help='Show combined search engines from all profiles, displaying all versions when shortcuts differ'
     )
     
     parser.add_argument(
@@ -482,7 +492,7 @@ def show_search_shortcuts():
 
 
 def show_combined_search_shortcuts():
-    """Show combined search engine shortcuts from all profiles, using the most recent version of each shortcut."""
+    """Show combined search engine shortcuts from all profiles, displaying all versions with conflicts."""
     os_name, browser_paths = detect_os()
     
     print(f"Operating System: {os_name}")
@@ -492,8 +502,8 @@ def show_combined_search_shortcuts():
         print("Unsupported operating system")
         return
     
-    # Dictionary to store the most recent version of each shortcut
-    combined_shortcuts = {}
+    # Dictionary to store all versions of each shortcut
+    all_shortcuts = {}  # keyword_lower -> list of shortcuts
     profiles_found = False
     
     for browser_path in browser_paths:
@@ -532,38 +542,90 @@ def show_combined_search_shortcuts():
 
             # Process each shortcut (use lowercase key to avoid case collisions)
             for shortcut in shortcuts:
+                # Skip browser-specific URLs that shouldn't be synced between browsers
+                if is_browser_specific_url(shortcut['url']):
+                    continue
+                    
                 keyword_lower = shortcut['keyword'].lower()
 
-                # If we haven't seen this keyword before (case-insensitive), or if this version is newer
-                if (keyword_lower not in combined_shortcuts or
-                    shortcut['last_modified'] > combined_shortcuts[keyword_lower]['last_modified']):
-                    combined_shortcuts[keyword_lower] = shortcut
+                # Add to the list of all shortcuts for this keyword
+                if keyword_lower not in all_shortcuts:
+                    all_shortcuts[keyword_lower] = []
+                all_shortcuts[keyword_lower].append(shortcut)
     
     if not profiles_found:
         print("\nNo browser profiles found on this system.")
         print("Make sure Brave and/or Chrome browser is installed and has been run at least once.")
         return
     
-    if not combined_shortcuts:
+    if not all_shortcuts:
         print("No search shortcuts found in any profile.")
         return
     
-    print("Combined Search Engine Shortcuts (Most Recent Version)")
+    print("Combined Search Engine Shortcuts")
     print("=" * 100)
-    print(f"Found {len(combined_shortcuts)} unique shortcuts across all profiles\n")
+    print(f"Found {len(all_shortcuts)} unique shortcuts across all profiles\n")
     
     # Print header
     print(f"{'Name':<25} {'Shortcut':<12} {'URL':<35} {'Source Profile':<18}")
     print("-" * 100)
     
     # Print shortcuts sorted by keyword (case-insensitive)
-    for keyword_lower, shortcut in sorted(combined_shortcuts.items(), key=lambda x: x[1]['keyword'].lower()):
-        name = shortcut['name'][:24] if len(shortcut['name']) > 24 else shortcut['name']
-        keyword_display = shortcut['keyword'][:11] if len(shortcut['keyword']) > 11 else shortcut['keyword']
-        url = shortcut['url'][:34] if len(shortcut['url']) > 34 else shortcut['url']
-        profile = shortcut['profile_name'][:17] if len(shortcut['profile_name']) > 17 else shortcut['profile_name']
+    for keyword_lower in sorted(all_shortcuts.keys()):
+        shortcuts_for_keyword = all_shortcuts[keyword_lower]
         
-        print(f"{name:<25} {keyword_display:<12} {url:<35} {profile:<18}")
+        # Sort by last_modified descending to get newest first
+        shortcuts_for_keyword.sort(key=lambda x: x['last_modified'], reverse=True)
+        
+        # Check if there are multiple different versions (different name or URL)
+        unique_versions = []
+        for shortcut in shortcuts_for_keyword:
+            # Check if this version (name + URL) already exists
+            version_key = (shortcut['name'], shortcut['url'])
+            existing_version = None
+            for uv in unique_versions:
+                if (uv['name'], uv['url']) == version_key:
+                    existing_version = uv
+                    break
+            
+            if existing_version:
+                # Add this profile to the existing version's profile list
+                existing_version['profiles'].append(shortcut['profile_name'])
+                # Update last_modified to the most recent
+                if shortcut['last_modified'] > existing_version['last_modified']:
+                    existing_version['last_modified'] = shortcut['last_modified']
+            else:
+                # New version
+                unique_versions.append({
+                    'name': shortcut['name'],
+                    'keyword': shortcut['keyword'],
+                    'url': shortcut['url'],
+                    'last_modified': shortcut['last_modified'],
+                    'profiles': [shortcut['profile_name']]
+                })
+        
+        # Sort unique versions by last_modified descending
+        unique_versions.sort(key=lambda x: x['last_modified'], reverse=True)
+        
+        # Print each unique version
+        for i, version in enumerate(unique_versions):
+            name = version['name'][:24] if len(version['name']) > 24 else version['name']
+            keyword_display = version['keyword'][:11] if len(version['keyword']) > 11 else version['keyword']
+            url = version['url'][:34] if len(version['url']) > 34 else version['url']
+            
+            # Format profile names
+            profile_names = ', '.join(sorted(version['profiles']))
+            if i == 0 and len(unique_versions) > 1:
+                # This is the newest version and there are conflicts
+                profile_names += " (newest)"
+            
+            # If profile names are too long, truncate but show it's truncated
+            if len(profile_names) > 17:
+                profile = profile_names[:14] + "..."
+            else:
+                profile = profile_names
+            
+            print(f"{name:<25} {keyword_display:<12} {url:<35} {profile:<18}")
     
 
 
@@ -953,6 +1015,10 @@ def sync_search_engines_to_all_profiles():
 
             # Process each shortcut to find the newest version (case-insensitive)
             for shortcut in shortcuts:
+                # Skip browser-specific URLs that shouldn't be synced between browsers
+                if is_browser_specific_url(shortcut['url']):
+                    continue
+                    
                 keyword_lower = shortcut['keyword'].lower()
 
                 # If we haven't seen this keyword before, or if this version is newer
