@@ -14,7 +14,7 @@ Tested on macOS and Linux. Windows support requires running this script from the
 
 Include the --smoke-test option in [bug reports](https://github.com/mcgroarty/brave-search-sync/issues).
 
-Mostly AI-coded, but humam-reviewed.
+Mostly AI-coded, but human-reviewed.
 
 ## Overview
 
