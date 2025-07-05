@@ -16,7 +16,7 @@ This tool syncs custom search engine shortcuts across all your Chromium-based br
 2. Close all Chromium browsers completely (Brave and Chrome)
 3. Run `./chromium-search-sync --smoke-test` to verify system compatibility
 4. Run `./chromium-search-sync -c` for a dry run preview of what will be synced
-5. Run `./chromium-search-sync -cs` to sync everything
+5. Run `./chromium-search-sync -cs` to sync everything (adds new shortcuts and updates existing ones)
 6. Reopen your browsers and visit `chrome://settings/search` (Chrome) or `brave://settings/search` (Brave) in each profile to activate the newly added search engines
 
 **Safety:** Always backup your browser configs first (locations shown in help with `-h`). The tool won't run if browsers are open and includes built-in protections against deleting essential search engines.
@@ -52,7 +52,7 @@ When you have multiple Chromium-based browser profiles (Brave and Chrome across 
 - **Multi-browser support**: Automatically detects and manages both Brave and Chrome browsers
 - **Profile discovery**: Automatically finds all browser profiles (Default, Profile 1-N, System Profile)
 - **Search engine listing**: View shortcuts for individual profiles or combined across all profiles
-- **Intelligent syncing**: Copies the most recent version of each shortcut to all profiles
+ - **Intelligent syncing**: Copies the most recent version of each shortcut to all profiles and updates existing entries when the name or URL changes
 - **Cross-browser compatibility**: Filters out browser-specific schemes (brave://, chrome://) to prevent conflicts
 - **Safe deletion**: Remove shortcuts from all profiles with built-in protections
 - **System validation**: Comprehensive smoke tests to ensure safe operation
@@ -87,12 +87,12 @@ Both Brave and Chrome store search engines in SQLite databases located in each p
 2. **Collection**: Reads search engines from each profile's database
 3. **Filtering**: Excludes browser-specific schemes (brave://, chrome://) that don't work across browsers
 4. **Comparison**: Identifies the most recent version of each shortcut keyword (case-insensitive)
-5. **Synchronization**: Copies missing shortcuts to profiles that don't have them
+5. **Synchronization**: Copies missing shortcuts to profiles that don't have them and updates existing shortcuts if their details differ
 6. **Validation**: Ensures case-insensitive keyword matching and prevents duplicates
 
 The tool uses the `last_modified` timestamp to determine which version of a search engine is newest when the same keyword exists in multiple profiles.
 
-**Note**: After synchronization, newly added search engines will appear in the "Other search engines" section of each profile's search settings (`chrome://settings/search` for Chrome or `brave://settings/search` for Brave). You need to visit this page in each profile to activate them for use.
+**Note**: After synchronization, newly added search engines will appear in the "Other search engines" section of each profile's search settings (`chrome://settings/search` for Chrome or `brave://settings/search` for Brave). Updated search engines keep their active status, but newly added ones require visiting this page in each profile to activate them for use.
 
 ## Installation
 
@@ -202,7 +202,7 @@ The script supports the following command-line options:
    ./chromium-search-sync -c
    ```
 
-4. **Sync everything:**
+4. **Sync everything (adds new shortcuts and updates existing ones):**
 
    ```bash
    ./chromium-search-sync -cs
