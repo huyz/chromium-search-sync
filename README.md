@@ -6,15 +6,27 @@ A Python utility for managing and synchronizing search engines across Brave Brow
 
 ## TL;DR: Too Long, Didn't Read. Twitter broke my attention span.
 
-This tool syncs custom search engine shortcuts across all your Brave browser profiles. Close Brave, run `./brave-search-sync -cs` to sync everything, then reopen Brave and visit `brave://settings/search` in each profile to activate the newly added search engines. Use `-c` on its own for a dry run preview. It's good to backup your Brave config first, just in case. The brave config dir location is shown in `-h`. Run `./brave-search-sync --smoke-test` to check if your system is ready.
+This tool syncs custom search engine shortcuts across all your Brave browser profiles.
+
+**Quick Start:**
+
+1. Close Brave completely
+2. Run `./brave-search-sync --smoke-test` to verify system compatibility
+3. Run `./brave-search-sync -c` for a dry run preview of what will be synced
+4. Run `./brave-search-sync -cs` to sync everything
+5. Reopen Brave and visit `brave://settings/search` in each profile to activate the newly added search engines
+
+**Safety:** Always backup your Brave config first (location shown in help with `-h`). The tool won't run if Brave is open and includes built-in protections against deleting essential search engines.
 
 ## Current Status
 
-Tested on macOS and Linux. Windows support requires running this script from the Cygwin environment. Open an issue if you test before me and it fails.
+**Tested on:** macOS and Linux
 
-Include the --smoke-test option in [bug reports](https://github.com/mcgroarty/brave-search-sync/issues).
+**Windows Support:** Requires Cygwin environment (native Windows not supported)
 
-Mostly AI-coded, but human-reviewed.
+**Development:** Mostly AI-coded, but extensively human-reviewed and tested
+
+**Bug Reports:** Include `--smoke-test` output when reporting issues on [GitHub](https://github.com/mcgroarty/brave-search-sync/issues)
 
 ## Overview
 
@@ -42,10 +54,14 @@ When you have multiple Brave Browser profiles (personal, work, hobby, etc.), man
 
 ### Safety Features
 
-- **Process detection**: Prevents running while Brave is active to avoid database corruption
-- **Backup warnings**: Reminds users to backup their Brave configuration
-- **Built-in protections**: Prevents deletion of essential built-in search engines
-- **Write permission checks**: Validates file system access before making changes
+The tool includes multiple safety mechanisms to protect your data:
+
+- **Process Detection**: Automatically detects if Brave is running and refuses to proceed if it is
+- **Permission Validation**: Checks write permissions before attempting any modifications
+- **Built-in Search Engine Protection**: Prevents deletion of essential search engines (Google, DuckDuckGo, Brave Search)
+- **Database Integrity**: Uses atomic transactions to prevent database corruption
+- **Backup Reminders**: Consistently reminds users to backup their configuration
+- **Comprehensive Testing**: The `--smoke-test` option validates system compatibility before use
 - **Error handling**: Graceful handling of database locks and permission issues
 
 ## How It Works
@@ -102,26 +118,62 @@ python3 brave-search-sync [options]
 
 ## Usage
 
+### Command-Line Options
+
+The script supports the following command-line options:
+
+| Option | Long Form | Description |
+|--------|-----------|-------------|
+| `-p` | `--profiles` | List all Brave browser profiles with their names and directories |
+| `-s` | `--search-shortcuts` | Show search engine shortcuts for each profile |
+| `-c` | `--combined` | Show combined search engines from all profiles (most recent version of each shortcut) |
+| `-cs` | `--combined-sync` | Sync newest search engines to all profiles (case-insensitive keyword matching) - **CAUTION: Modifies Brave configuration** |
+| `-d SHORTCUT` | `--delete SHORTCUT` | Delete search engine with specified shortcut from all profiles - **CAUTION: Modifies Brave configuration** |
+| | `--smoke-test` | Run system validation checks to ensure the tool can operate safely |
+| `-h` | `--help` | Show help message and exit |
+
 ### Basic Commands
 
+**List all profiles:**
+
 ```bash
-# List all Brave browser profiles
 ./brave-search-sync -p
+```
 
-# Show search engine shortcuts for each profile
+**Show search shortcuts for each profile:**
+
+```bash
 ./brave-search-sync -s
+```
 
-# Show combined search engines from all profiles (most recent version of each shortcut)
+**Show combined search engines (dry run preview):**
+
+```bash
 ./brave-search-sync -c
+```
 
-# Sync newest search engines to all profiles
+**Sync newest search engines to all profiles:**
+
+```bash
 ./brave-search-sync -cs
+```
 
-# Delete a search engine shortcut from all profiles
+**Delete a specific search engine shortcut:**
+
+```bash
 ./brave-search-sync -d :shortcut
+```
 
-# Run system validation checks
+**Run system validation checks:**
+
+```bash
 ./brave-search-sync --smoke-test
+```
+
+**Show help:**
+
+```bash
+./brave-search-sync -h
 ```
 
 ### Example Workflow
@@ -298,35 +350,6 @@ Make sure:
 2. You have the correct Brave installation (not Brave Beta or Brave Nightly)
 3. Your OS is supported (macOS, Linux, Windows)
 
-## Troubleshooting
+## Contributing
 
-### "Brave Browser is currently running" Error
-
-If you get this error, make sure to:
-
-1. Quit Brave normally (Cmd+Q on macOS, Ctrl+Q on Linux/Windows)
-2. Wait a few seconds for all processes to terminate
-3. Or use: `pkill -f brave` to force quit
-4. Run the script again
-
-### Permission Denied Errors
-
-Run the smoke test first to check permissions:
-
-```bash
-./brave-search-sync --smoke-test
-```
-
-Ensure you have write permissions to the Brave configuration directory.
-
-### Database Locked Errors
-
-This usually means Brave is still running. Make sure all Brave processes are closed before running the tool.
-
-### No Profiles Found
-
-Make sure:
-
-1. Brave is installed and has been run at least once
-2. You have the correct Brave installation (not Brave Beta or Brave Nightly)
-3. Your OS is supported (macOS, Linux, Windows)
+Feel free to submit issues, feature requests, or pull requests on the [GitHub repository](https://github.com/mcgroarty/brave-search-sync).
