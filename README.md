@@ -14,7 +14,7 @@ Tested on macOS and Linux. Windows support requires running this script from the
 
 Include the --smoke-test option in [bug reports](https://github.com/mcgroarty/brave-search-sync/issues).
 
-Mostly AI-coded, but humam-reviewed.
+Mostly AI-coded, but human-reviewed.
 
 ## Overview
 
@@ -64,9 +64,11 @@ Brave stores search engines in SQLite databases located in each profile's `Web D
 
 1. **Discovery**: Finds all Brave profiles on the system
 2. **Collection**: Reads search engines from each profile's database
-3. **Comparison**: Identifies the most recent version of each shortcut keyword
+3. **Comparison**: Identifies the most recent version of each shortcut keyword (case-insensitive)
 4. **Synchronization**: Copies missing shortcuts to profiles that don't have them
 5. **Validation**: Ensures case-insensitive keyword matching and prevents duplicates
+
+The tool uses the `last_modified` timestamp to determine which version of a search engine is newest when the same keyword exists in multiple profiles.
 
 **Note**: After synchronization, newly added search engines will appear in the "Other search engines" section of each profile's search settings (`brave://settings/search`). You need to visit this page in each profile to activate them for use.
 
@@ -80,6 +82,24 @@ No installation required - this is a standalone Python script.
 - Standard library only (no external dependencies)
 - Brave browser installed and run at least once
 
+**File Permissions:**
+
+The script requires write permissions to Brave's configuration directory to modify search engine databases. The script will check permissions during the smoke test and before making any changes.
+
+**Making the Script Executable:**
+
+```bash
+chmod +x brave-search-sync
+```
+
+**Alternative Execution:**
+
+If you prefer not to make it executable, you can run it with Python directly:
+
+```bash
+python3 brave-search-sync [options]
+```
+
 ## Usage
 
 ### Basic Commands
@@ -91,7 +111,7 @@ No installation required - this is a standalone Python script.
 # Show search engine shortcuts for each profile
 ./brave-search-sync -s
 
-# Show combined search engines from all profiles
+# Show combined search engines from all profiles (most recent version of each shortcut)
 ./brave-search-sync -c
 
 # Sync newest search engines to all profiles
@@ -107,16 +127,19 @@ No installation required - this is a standalone Python script.
 ### Example Workflow
 
 1. **Check your profiles:**
+
    ```bash
    ./brave-search-sync -p
    ```
 
 2. **See what search engines you have:**
+
    ```bash
    ./brave-search-sync -s
    ```
 
 3. **View the combined list (most recent versions):**
+
    ```bash
    ./brave-search-sync -c
    ```
@@ -129,6 +152,26 @@ No installation required - this is a standalone Python script.
 
 5. **Activate new search engines:**
    After synchronization, you need to visit `brave://settings/search` in each profile to activate the newly added search engines. They will appear in the "Other search engines" section and can be activated by clicking on them.
+
+## Important Notes
+
+### Database Locking
+
+- **Always close Brave completely** before running this tool
+- The script will check for running Brave processes and refuse to run if any are detected
+- Database files are locked while Brave is running, preventing safe modifications
+
+### Search Engine Activation
+
+After running `-cs` (sync), newly added search engines will appear in the "Other search engines" section of each profile's search settings. You must visit `brave://settings/search` in each profile to activate them for use in the address bar.
+
+### Case-Insensitive Matching
+
+The tool uses case-insensitive keyword matching during synchronization to prevent duplicates. For example, `:G` and `:g` are considered the same shortcut.
+
+### Built-in Search Engine Protection
+
+The deletion feature (`-d`) includes built-in protections against removing essential search engines that have `prepopulate_id > 0` (like Google, DuckDuckGo, Brave Search).
 
 ## Design Philosophy
 
@@ -175,8 +218,9 @@ The tool works with Brave's `keywords` table structure, understanding:
 
 - WebKit timestamp format (microseconds since January 1, 1601)
 - Search URL templates with `{searchTerms}` placeholders
-- Built-in vs custom search engine identification
+- Built-in vs custom search engine identification via `prepopulate_id`
 - Case-insensitive keyword matching
+- Common `prepopulate_id` values: 1 (Google), 501 (DuckDuckGo), 550 (Brave Search)
 
 ### Profile Discovery
 
@@ -185,6 +229,21 @@ Intelligently discovers profiles through:
 1. **Primary source**: Local State file for profile names
 2. **Fallback**: Individual profile Preferences files
 3. **Directory scanning**: Finds Default, Profile 1-N, and System Profile directories
+
+### Process Detection
+
+The tool uses the `ps` command to detect running Brave processes and will refuse to run if Brave is active. This prevents database corruption and ensures safe operation.
+
+### Smoke Test Features
+
+The `--smoke-test` option performs comprehensive validation:
+
+- OS detection and path validation
+- Brave directory structure verification
+- Profile discovery testing
+- SQLite database schema validation
+- Write permission checks
+- Command-line tool availability
 
 ## License
 
@@ -198,8 +257,43 @@ Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE) for detai
 
 ⚠️ **Use at your own risk - this tool modifies Brave's configuration files.**
 
+⚠️ **The tool will check for running Brave processes and refuse to run if any are detected.**
+
 ## Backup Locations
 
 - **macOS**: `~/Library/Application Support/BraveSoftware/Brave-Browser`
 - **Linux**: `~/.config/BraveSoftware/Brave-Browser`  
 - **Windows (Cygwin required)**: `~/AppData/Local/BraveSoftware/Brave-Browser`
+
+## Troubleshooting
+
+### "Brave Browser is currently running" Error
+
+If you get this error, make sure to:
+
+1. Quit Brave normally (Cmd+Q on macOS, Ctrl+Q on Linux/Windows)
+2. Wait a few seconds for all processes to terminate
+3. Or use: `pkill -f brave` to force quit
+4. Run the script again
+
+### Permission Denied Errors
+
+Run the smoke test first to check permissions:
+
+```bash
+./brave-search-sync --smoke-test
+```
+
+Ensure you have write permissions to the Brave configuration directory.
+
+### Database Locked Errors
+
+This usually means Brave is still running. Make sure all Brave processes are closed before running the tool.
+
+### No Profiles Found
+
+Make sure:
+
+1. Brave is installed and has been run at least once
+2. You have the correct Brave installation (not Brave Beta or Brave Nightly)
+3. Your OS is supported (macOS, Linux, Windows)
