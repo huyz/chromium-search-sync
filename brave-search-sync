@@ -122,14 +122,15 @@ def detect_os():
         ]
     elif system == "windows":
         # Check if running under Cygwin
-        if "CYGWIN" in os.environ.get("TERM", ""):
+        if "CYGWIN" in os.environ.get("TERM", "") or \
+           os.environ.get("OSTYPE", "").lower().startswith("cygwin"):
             return "Windows (Cygwin)", [
                 Path.home() / "AppData" / "Local" / "BraveSoftware" / "Brave-Browser"
             ]
         else:
-            return "Windows", [
-                Path.home() / "AppData" / "Local" / "BraveSoftware" / "Brave-Browser"
-            ]
+            print("ERROR: Running on Windows without Cygwin is not supported.")
+            print("Please install Cygwin and run this script inside the Cygwin environment.")
+            sys.exit(1)
     else:
         return "Unknown", []
 

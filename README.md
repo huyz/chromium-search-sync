@@ -10,7 +10,7 @@ This tool syncs custom search engine shortcuts across all your Brave browser pro
 
 ## Current Status
 
-Tested on macOS. I'll check Linux and Windows soon. Open an issue if you test before me and it fails.
+Tested on macOS and Linux. Windows support requires running this script from the Cygwin environment. Open an issue if you test before me and it fails.
 
 Include the --smoke-test option in [bug reports](https://github.com/mcgroarty/brave-search-sync/issues).
 
@@ -33,7 +33,7 @@ When you have multiple Brave Browser profiles (personal, work, hobby, etc.), man
 
 ### Core Functionality
 
-- **Cross-platform support**: Works on macOS, Linux, Windows, and Windows/Cygwin
+- **Cross-platform support**: Works on macOS, Linux, and Windows via Cygwin (Cygwin required on Windows)
 - **Profile discovery**: Automatically finds all Brave profiles (Default, Profile 1-N, System Profile)
 - **Search engine listing**: View shortcuts for individual profiles or combined across all profiles
 - **Intelligent syncing**: Copies the most recent version of each shortcut to all profiles
@@ -147,7 +147,7 @@ The tool centralizes OS-specific logic in `detect_os()` and uses `pathlib` for c
 
 - **macOS**: `~/Library/Application Support/BraveSoftware/Brave-Browser`
 - **Linux**: `~/.config/BraveSoftware/Brave-Browser`
-- **Windows**: `~/AppData/Local/BraveSoftware/Brave-Browser`
+- **Windows (Cygwin required)**: `~/AppData/Local/BraveSoftware/Brave-Browser`
 
 ### Error Handling
 
@@ -202,4 +202,4 @@ Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE) for detai
 
 - **macOS**: `~/Library/Application Support/BraveSoftware/Brave-Browser`
 - **Linux**: `~/.config/BraveSoftware/Brave-Browser`  
-- **Windows**: `~/AppData/Local/BraveSoftware/Brave-Browser`
+- **Windows (Cygwin required)**: `~/AppData/Local/BraveSoftware/Brave-Browser`
