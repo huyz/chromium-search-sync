@@ -53,6 +53,7 @@ When you have multiple Chromium-based browser profiles (Brave and Chrome across 
 - **Profile discovery**: Automatically finds all browser profiles (Default, Profile 1-N, System Profile)
 - **Search engine listing**: View shortcuts for individual profiles or combined across all profiles
 - **Intelligent syncing**: Copies the most recent version of each shortcut to all profiles
+- **Cross-browser compatibility**: Filters out browser-specific schemes (brave://, chrome://) to prevent conflicts
 - **Safe deletion**: Remove shortcuts from all profiles with built-in protections
 - **System validation**: Comprehensive smoke tests to ensure safe operation
 
@@ -84,9 +85,10 @@ Both Brave and Chrome store search engines in SQLite databases located in each p
 
 1. **Discovery**: Finds all Brave and Chrome profiles on the system
 2. **Collection**: Reads search engines from each profile's database
-3. **Comparison**: Identifies the most recent version of each shortcut keyword (case-insensitive)
-4. **Synchronization**: Copies missing shortcuts to profiles that don't have them
-5. **Validation**: Ensures case-insensitive keyword matching and prevents duplicates
+3. **Filtering**: Excludes browser-specific schemes (brave://, chrome://) that don't work across browsers
+4. **Comparison**: Identifies the most recent version of each shortcut keyword (case-insensitive)
+5. **Synchronization**: Copies missing shortcuts to profiles that don't have them
+6. **Validation**: Ensures case-insensitive keyword matching and prevents duplicates
 
 The tool uses the `last_modified` timestamp to determine which version of a search engine is newest when the same keyword exists in multiple profiles.
 
@@ -130,7 +132,7 @@ The script supports the following command-line options:
 |--------|-----------|-------------|
 | `-p` | `--profiles` | List all Brave and Chrome browser profiles with their names and directories |
 | `-s` | `--search-shortcuts` | Show search engine shortcuts for each profile |
-| `-c` | `--combined` | Show combined search engines from all profiles (most recent version of each shortcut) |
+| `-c` | `--combined` | Show combined search engines from all profiles, displaying all versions when shortcuts differ (excludes browser-specific schemes) |
 | `-cs` | `--combined-sync` | Sync newest search engines to all profiles (case-insensitive keyword matching) - **CAUTION: Modifies browser configurations** |
 | `-d SHORTCUT` | `--delete SHORTCUT` | Delete search engine with specified shortcut from all profiles - **CAUTION: Modifies browser configurations** |
 | | `--smoke-test` | Run system validation checks to ensure the tool can operate safely |
@@ -231,6 +233,22 @@ After running `-cs` (sync), newly added search engines will appear in the "Other
 ### Case-Insensitive Matching
 
 The tool uses case-insensitive keyword matching during synchronization to prevent duplicates. For example, `:G` and `:g` are considered the same shortcut.
+
+### Browser-Specific Scheme Filtering
+
+The tool automatically filters out browser-specific schemes during synchronization and when displaying combined results:
+
+- **brave://** schemes (like bookmarks, history, settings) are excluded from Chrome profiles
+- **chrome://** schemes are excluded from Brave profiles
+- This prevents broken shortcuts and ensures only cross-browser compatible search engines are synced
+
+Examples of filtered schemes:
+
+- `@bookmarks` with `brave://bookmarks/` or `chrome://bookmarks/`
+- `@history` with `brave://history/` or `chrome://history/`
+- `@settings` with `brave://settings/` or `chrome://settings/`
+
+These browser-specific shortcuts remain functional within their respective browsers but are not synced across different browser types.
 
 ### Built-in Search Engine Protection
 
