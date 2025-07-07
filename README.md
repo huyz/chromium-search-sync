@@ -103,7 +103,7 @@ Clone this repository or download the standalone `chromium-search-sync` script. 
 
 **Requirements:**
 
-- Python 3.6+ (uses pathlib, f-strings, and other modern Python features)
+ - Python 3.7+ (uses pathlib, f-strings, and `subprocess.run(text=True)`)
 - Standard library only (no external dependencies)
 - Required modules: `os`, `sys`, `platform`, `json`, `argparse`, `sqlite3`, `subprocess`, `time`, `shutil`, `re`, `pathlib`
 - Brave and/or Chrome browser installed and run at least once
